@@ -1,6 +1,8 @@
 // The last line of a command's output that says what it waits for. In a terminal a spinner
 // turns and the time of the wait counts up, so a long wait never looks hung; printed lines go
 // above it. Elsewhere each new text is printed once.
+import { foldText } from './fit.ts';
+
 const SPINNER = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏';
 const FRAME_MS = 100;
 const CYAN = '\x1b[36m', DIM = '\x1b[2m', RESET = '\x1b[0m';
@@ -30,7 +32,10 @@ export function liveLine(output: LiveOutput, { color = false, now = Date.now }: 
   return {
     print(line) {
       if (live && text) clear();
-      output.write(`${line}\n`);
+      // In a terminal a long plain line folds at a space, under its own indent (issue 32);
+      // a painted one is folded by whoever painted it.
+      const lines = live && !line.includes('\x1b') ? foldText(line, output.columns || 80) : [line];
+      output.write(`${lines.join('\n')}\n`);
       if (live && text) draw();
     },
     wait(next) {

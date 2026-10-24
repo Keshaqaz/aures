@@ -44,3 +44,13 @@ test('a wait text wider than the terminal is cut to stay on one line', () => {
   assert.equal(drawn, '⠋ GitHub пост… 0:00');
   assert.ok([...drawn].length < 20);
 });
+
+test('in a terminal a long plain line folds at a space under its indent; outside one it is printed as is (issue 32)', () => {
+  const line = '  Включите API скрипта Google Apps: откройте строку и нажмите переключатель.';
+  const tty = stream(true, 40);
+  liveLine(tty).print(line);
+  assert.deepEqual(tty.writes, ['  Включите API скрипта Google Apps:\n  откройте строку и нажмите\n  переключатель.\n']);
+  const pipe = stream(false, 40);
+  liveLine(pipe).print(line);
+  assert.deepEqual(pipe.writes, [`${line}\n`]);
+});

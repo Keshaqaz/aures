@@ -9,6 +9,7 @@ import { WORKFLOW_FILE, resetName, unfinished, switchUnfinished, ruleLabel, reas
   failedRunAdvice } from './common.ts';
 import type { Logged, Rule } from './common.ts';
 import { projectUrl, rulesOf } from './active-worker.ts';
+import type { Segment } from './fit.ts';
 import { brokenOnGoogle } from './google.ts';
 import type { Worker, GoogleWorker } from './active-worker.ts';
 import type { Platform } from './watch-files.ts';
@@ -236,8 +237,8 @@ export const overviewItems = (model: Overview): Item[] => [
 export const sameItem = (a: Item, b: Item | undefined): boolean =>
   a.kind === 'reset' ? b?.kind === 'reset' && b.creditId === a.creditId : b?.kind === 'rule' && b.rule === a.rule;
 
-// A piece of a line and its SGR style; '' is no style.
-export type Segment = [text: string, style: string];
+// Lines are made of segments, [text, style] (fit.ts).
+export type { Segment } from './fit.ts';
 const len = (text: string): number => [...text].length;
 // A line with segments on the left and on the right edge.
 const spread = (left: Segment[], right: Segment[], width: number): Segment[] => {

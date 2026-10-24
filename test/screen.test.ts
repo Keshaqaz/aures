@@ -58,6 +58,19 @@ test('the screen shows the resets on top, the rules under them and moves the cur
   assert.match(text(), /▸ ☐ Когда кончится недельный лимит/);
 });
 
+test('in a narrow terminal every line of both screens folds under its text, none wider than the frame (issue 32)', async () => {
+  const { screen, press } = await opened();
+  const width = 40;
+  const narrow = () => screen.frame(width, false, true);
+  for (const line of narrow()) assert.ok([...line].length <= width, line);
+  assert.ok(narrow().includes('  https://github.com/octo-fake/'), narrow().join('\n'));
+  assert.ok(narrow().includes('  codex-auto-resets-worker'), narrow().join('\n'));
+  await press('tab');
+  for (const line of narrow()) assert.ok([...line].length <= width, line);
+  assert.deepEqual(screen.frame().filter(line => [...line].length > width).length > 0, true, 'the lines themselves stay whole');
+  screen.close();
+});
+
 test('Enter on a reset applies it now after a «y», any other key cancels', async () => {
   const { world, repo, press, text, screen } = await opened();
   await press('down', 'return');

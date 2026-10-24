@@ -9,6 +9,7 @@ import { saveRules, storedRules } from './rules.ts';
 import { openWorker } from './active-worker.ts';
 import type { Worker, OpenWorkerOptions } from './active-worker.ts';
 import type { Io, Rule, Sleep } from './common.ts';
+import { fit } from './fit.ts';
 import { readOverview, renderOverview, overviewItems, sameItem, headerLine, paint, S, WIDTH } from './overview.ts';
 import type { Overview, Tone as OverviewTone } from './overview.ts';
 import { readWorkerPage, renderWorker, itemLabel, POLL_MS, workerItems, FIRST_ACTION } from './worker-screen.ts';
@@ -146,8 +147,9 @@ export class Screen {
     return 'exit';
   }
 
-  // Lines of the frame, painted when color.
-  frame(width = WIDTH, color = false): string[] {
+  // Lines of the frame, painted when color. fold folds the long ones under their text (issue
+  // 32), as the terminal needs; the lines themselves, as tests read them, stay whole.
+  frame(width = WIDTH, color = false, fold = color): string[] {
     const options = { now: this.now, timeZone: this.timeZone, width, toggle: true };
     let lines;
     if (this.view === 'worker') {
@@ -163,7 +165,8 @@ export class Screen {
       lines.push([[t(`Apply ${resetName(this.confirm)} now? A reset is single-use. `, `Применить ${resetName(this.confirm)} сейчас? Сброс одноразовый. `), S.bold],
         [t('y — yes, any other key — cancel', 'y — да, другая клавиша — отмена'), S.dim]]);
     } else lines.push([[this.view === 'worker' ? workerHint() : hint(), S.dim]]);
-    return lines.map(line => paint(line, color));
+    // Long lines fold under their text, not at the terminal's edge (issue 32).
+    return (fold ? lines.flatMap(line => fit(line, width)) : lines).map(line => paint(line, color));
   }
 
   // One key; resolves when what it started is done, to 'exit' when the screen closes.
