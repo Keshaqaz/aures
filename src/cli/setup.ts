@@ -44,12 +44,10 @@ export async function trialRun({ api, repo, io, now, sleep, timeZone, paused }:
 async function choosePlatform(io: Io, files: WatchFiles): Promise<Install> {
   const install = await files.readInstall();
   if (install) return install;
-  io.print(t('  1. GitHub Actions — runs once an hour, but GitHub skips many runs; the before-expiry rule starts 8 hours ahead.',
-    '  1. GitHub Actions — запуск раз в час, но GitHub пропускает многие запуски; правило перед истечением начинает за 8 часов.'));
-  io.print(t('  2. Google Apps Script — runs every 5 minutes, the before-expiry rule starts 1 hour ahead; Google will show two ' +
-    '«unverified app» warnings and ask for one switch to be turned on.',
-  '  2. Google Apps Script — запуск каждые 5 минут, правило перед истечением начинает за 1 час; при установке Google дважды ' +
-    'предупредит о непроверенном приложении и попросит включить один переключатель.'));
+  io.print(t('  1. GitHub Actions — runs once an hour, but GitHub skips many runs.',
+    '  1. GitHub Actions — раз в час, GitHub пропускает многие запуски.'));
+  io.print(t('  2. Google Apps Script — runs every 5 minutes.',
+    '  2. Google Apps Script — каждые 5 минут.'));
   for (;;) {
     const answer = (await io.prompt(t('Type 1 or 2: ', 'Введите 1 или 2: '))).trim();
     const platform = answer === '1' ? 'github' : answer === '2' ? 'google' : null;
@@ -64,8 +62,10 @@ async function choosePlatform(io: Io, files: WatchFiles): Promise<Install> {
 // `aures setup`: from nothing to a working worker, or the missing parts of an existing one,
 // on the platform the user picks once. Returns the process exit code.
 // workerSource is the GitHub worker bundle, appsScriptSource the Apps Script one; random picks the cron minute.
-// openScreen opens the main screen after a successful setup in a terminal (issue 30): main
-// passes it only then, so pipes and tests never see the screen.
+// openScreen is what a terminal setup does when it is done (issue 30): setup tells the user
+// and hands over as its last step. main passes one that opens the screen after the command's
+// own readline is closed — stdin must have one reader while the screen runs; tests inject
+// their own to see that the hand-over comes after everything setup has to say.
 export interface SetupOptions extends CommandOptions {
   workerSource: string;
   appsScriptSource: string;
@@ -90,8 +90,9 @@ export async function setup(options: SetupOptions): Promise<number> {
     } finally { io.wait(null); }
   });
   // A successful setup in a terminal opens the screen (issue 30): the resets and the rules it
-  // just made are what the screen shows. Outside a terminal, or after a failure, setup ends as
-  // any other command.
+  // just made are what the screen shows. This is setup's last step — tell the user and hand
+  // over — so that by the time the screen runs, setup itself is done. Outside a terminal, or
+  // after a failure, setup ends as any other command.
   if (code !== 0 || !options.openScreen) return code;
   io.print(t('Opening aures…', 'Открываю aures…'));
   return options.openScreen();

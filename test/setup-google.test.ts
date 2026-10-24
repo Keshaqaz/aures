@@ -35,9 +35,9 @@ test('setup on Google goes from nothing to a scheduled worker and ends with a tr
   const { code, io } = await cli.run();
   assert.equal(code, 0, io.output());
 
-  // Both platforms are named with their cost, none is recommended.
-  assert.match(io.output(), /1\. GitHub Actions — .*за 8 часов/);
-  assert.match(io.output(), /2\. Google Apps Script — .*каждые 5 минут.*непроверенном приложении/);
+  // Both platforms are named, shortly (issue 30), none is recommended.
+  assert.match(io.output(), /1\. GitHub Actions — раз в час, GitHub пропускает многие запуски\./);
+  assert.match(io.output(), /2\. Google Apps Script — каждые 5 минут\./);
   assert.doesNotMatch(io.output(), /рекоменд/i);
   // The stages of issue 30: one line per stage, the platform first, ✓ with what the stage
   // got; the one switch of the Apps Script API is told at once, inside the worker's stage.

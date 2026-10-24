@@ -9,7 +9,7 @@ import { FILES, STATE_KEY_SECRET, TRIAL_INPUT } from '../src/worker/layout.ts';
 import { openState, readRules } from '../src/worker/state-file.ts';
 import type { Summary } from '../src/worker/summary.ts';
 import { credit } from './support/fake-world.ts';
-import { cliWorld, WORKER_SOURCE } from './support/cli-world.ts';
+import { cliWorld, terminal, WORKER_SOURCE } from './support/cli-world.ts';
 import type { CliFakeWorld, RunOptions } from './support/cli-world.ts';
 
 const HOUR = 3600_000, DAY = 24 * HOUR;
@@ -333,16 +333,27 @@ test('the GitHub login waits as GitHub asks and stops when the user denies acces
 });
 
 // A successful setup in a terminal opens the screen (issue 30): main hands setup openScreen
-// only when stdout is a terminal, so pipes and tests without it never see the screen. Here the
-// hook is injected, as main injects it — no real terminal is needed.
+// only when stdout is a terminal — and opens the screen itself after the command's readline is
+// closed, so stdin has one reader while the screen runs. Here the hook is injected, as main
+// injects it; what it sees is the test's: the hand-over comes after everything setup has to
+// say, and outside a terminal nothing is handed over at all.
 test('a successful setup opens the screen when the terminal asks for it; a failure does not', async () => {
-  const { run } = await installWorld();
-  const opened: string[] = [];
-  const { code, io } = await run({ answers: ['1', ''], openScreen: async () => { opened.push('screen'); return 0; } });
+  const env = await cliWorld();
+  const io = terminal(env.world, ['1', '']);
+  const seenAtHandOver: string[] = [];
+  const { code } = await env.run(setup, { io,
+    openScreen: async () => { seenAtHandOver.push(io.lines.at(-1) ?? ''); return 0; } });
   assert.equal(code, 0, io.output());
-  assert.deepEqual(opened, ['screen'], 'the screen opened once, after the setup');
+  // The hand-over is setup's last step: by then the done line and its own telling are said.
+  assert.deepEqual(seenAtHandOver, ['Открываю aures…']);
   assert.equal(io.lines.at(-2), 'Готово. Сбросов: 2.');
   assert.equal(io.lines.at(-1), 'Открываю aures…');
+
+  // Outside a terminal nothing is handed over: the done line is the last one.
+  const plain = await installWorld();
+  const done = await plain.run({ answers: ['1', ''] });
+  assert.equal(done.code, 0, done.io.output());
+  assert.equal(done.io.lines.at(-1), 'Готово. Сбросов: 2.');
 
   // A failed setup never opens it, whatever the terminal.
   const failing = await installWorld();

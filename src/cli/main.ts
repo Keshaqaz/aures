@@ -93,9 +93,9 @@ async function main(): Promise<number> {
   }
   const tty = Boolean(process.stdin.isTTY && process.stdout.isTTY);
   const color = Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
-  // The screen, opened by `aures` without a command — and by a setup that succeeded in a
-  // terminal (issue 30), which hands it to setup as openScreen. Outside a terminal setup ends
-  // as any other command, and so the screen never opens in pipes and tests.
+  // The screen, opened by `aures` without a command — and after a setup that succeeded in a
+  // terminal (issue 30). setup only hands the wish over (openScreen below); the screen itself
+  // opens once the command's readline is closed, so that while it runs, stdin has one reader.
   const openMainScreen = async (): Promise<number> => {
     // A question before the screen opens (where the worker is) gets a line of its own.
     const prompt = async (question: string) => {
@@ -109,7 +109,11 @@ async function main(): Promise<number> {
     process.exit(await screen({ fetch: globalThis.fetch, ...access(), io, workerSource, appsScriptSource,
       mac: { files, agent: new LaunchAgent() }, terminal: { input: process.stdin, output: process.stdout } }));
   };
-  const commands: Record<string, Command> = { setup: withBundle(options => setup({ ...options, ...(tty ? { openScreen: openMainScreen } : {}) })),
+  // What a successful setup in a terminal asks for: the screen, opened by main once the
+  // command is over — not inside it, with the readline of the command still on stdin.
+  let screenAfterSetup = false;
+  const commands: Record<string, Command> = { setup: withBundle(options => setup({ ...options,
+      ...(tty ? { openScreen: async () => { screenAfterSetup = true; return 0; } } : {}) })),
     status, 'apply-now': applyNow, rules, login, upgrade: withBundle(upgrade), uninstall };
   // Outside a terminal the screen is printed once, as `status`.
   const run = name === undefined ? tty ? 'screen' : status : Object.hasOwn(commands, name) ? commands[name] ?? null : name === 'watch' ? 'watch' : null;
@@ -130,9 +134,14 @@ async function main(): Promise<number> {
   const terminal = createInterface({ input: process.stdin, output: process.stdout });
   const { print, wait } = liveLine(process.stdout, { color });
   const io = { print, wait, prompt: (question: string) => terminal.question(question), color };
+  let code: number;
   try {
-    return await run({ fetch: globalThis.fetch, ...access(), io, mac: { files, agent: new LaunchAgent() } });
+    code = await run({ fetch: globalThis.fetch, ...access(), io, mac: { files, agent: new LaunchAgent() } });
   } finally { terminal.close(); }
+  // A setup that succeeded in a terminal opens the screen (issue 30) — here and only here,
+  // with the command's readline closed and its live line gone, so the screen owns stdin alone.
+  if (screenAfterSetup) return await openMainScreen();
+  return code;
 }
 
 process.exitCode = await main();
