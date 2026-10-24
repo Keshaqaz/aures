@@ -47,6 +47,8 @@ aures setup
 
 `setup` asks where the worker will run — Google Apps Script (every 5 minutes) or GitHub Actions (about once an hour) — and goes in stages, one line each: `[1/4] Platform`, `[2/4] Signing in to Google`, `[3/4] The worker on Google`, `[4/4] Signing in to ChatGPT`. It opens every page itself, and when it is done the main screen opens. What to click on each Google screen is in the [guide](docs/installation.en.md#quick-install).
 
+<img src="docs/assets/setup-en.png" alt="aures setup on Google Apps Script: the platform, four stages with ticks, Done and the screen opening">
+
 The CLI speaks your Mac's language — Russian on a Russian locale, English on any other; `l` on the screen or `aures language` switches it.
 
 Full guide, including installing from source: [docs/installation.en.md](docs/installation.en.md).

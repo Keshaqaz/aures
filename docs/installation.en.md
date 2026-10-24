@@ -30,6 +30,8 @@ Google is more precise and simpler; its stages follow.
 
 It ends with `Done. Resets: N.`, and the main aures screen opens.
 
+<img src="assets/setup-en.png" alt="aures setup on Google Apps Script: the platform, four stages with ticks, Done and the screen opening">
+
 Both Google «unverified app» warnings are expected: the aures app and the worker script are yours, Google just has not reviewed them. If a stage waits longer than ~30 seconds, `setup` prints a hint with the buttons and a link in case the browser did not open. If `setup` is interrupted, just run it again — it picks up where it stopped.
 
 ### On GitHub
