@@ -132,7 +132,7 @@ Both rules cover all resets and work independently; change them with `aures rule
 - **Paid ChatGPT plan required**, with 5-hour and weekly limits. On a plan with a single monthly limit the weekly rule never fires.
 - **macOS only.** The CLI keeps its sign-ins in the Keychain.
 - **Broad GitHub access.** The GitHub sign-in gives the CLI access to all your repositories, like `gh`.
-- **The price of Google.** At install time and on later sign-ins Google shows two «unverified app» warnings, once you turn on the Apps Script API switch, and on uninstall you delete the script project by hand. Until the OAuth client is verified, a Google sign-in lives 7 days — upgrade sometimes asks you to sign in again.
+- **The price of Google.** At install time and on later sign-ins Google shows two «unverified app» warnings, once you turn on the Apps Script API switch, and on uninstall you delete the script project by hand.
 - **The worker's state on Google is not encrypted.** The worker's ChatGPT sign-in lives in the script project's properties: a key would sit right next to it ([ADR-0007](docs/adr/0007-two-worker-platforms.md)). The web app answers only requests with the secret from your Keychain.
 - **A real reset applied by the worker has not been verified live yet.** Reading resets and limits, sign-in and the apply request have been; details in [ADR-0004](docs/adr/0004-github-only-worker.md).
 

@@ -24,7 +24,7 @@ Google is more precise and simpler; its stages follow.
 | Stage | What to do |
 | --- | --- |
 | `[1/4] Platform` | Type `2`. |
-| `[2/4] Signing in to Google` | Pick the account → «Continue» → «Continue» → «Select all» → «Continue». |
+| `[2/4] Signing in to Google` | Pick the account. On the «Google hasn't verified this app» page: «Advanced» → «Go to aures (unsafe)». Then «Continue» → «Select all» → «Continue». |
 | `[3/4] The worker on Google` | If asked: on the page that opens, click the «Google Apps Script API» switch. Then on the «aures-worker (Unverified)» page: «Review permissions» → the same account → «Advanced» → «Go to aures-worker (unsafe)» → «Select all» → «Continue». |
 | `[4/4] Signing in to ChatGPT` | The code is already on the clipboard: paste it on the page that opens and sign in to the account with the resets. |
 
@@ -148,7 +148,7 @@ brew upgrade aures
 aures upgrade
 ```
 
-`aures upgrade` updates the worker itself; rules, journal and the ChatGPT sign-in are kept. On Google it may ask for the Google sign-in again (it lasts 7 days) — the same buttons as at install. From source: `git pull && npm ci && npm run build:worker`, then `aures upgrade`.
+`aures upgrade` updates the worker itself; rules, journal and the ChatGPT sign-in are kept. On Google it may ask for the Google sign-in again if it was revoked — the same buttons as at install. From source: `git pull && npm ci && npm run build:worker`, then `aures upgrade`.
 
 From a version before 0.3.0 (`codex-auto-resets`), upgrade once by the full name: `brew update && brew upgrade keshaqaz/tap/aures && aures upgrade`.
 

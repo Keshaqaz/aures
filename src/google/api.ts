@@ -27,7 +27,7 @@ const LOGIN_TIMEOUT_MS = 10 * 60_000;
 type Purpose = 'token' | 'refresh' | 'create_project' | 'get_project' | 'get_content' | 'update_content' | 'create_version' |
   'create_deployment' | 'update_deployment' | 'delete_deployment' | 'list_deployments' | 'web_app' | 'revoke';
 // api_disabled: the user has not turned on the Apps Script API in script.google.com/home/usersettings.
-// invalid_grant: the refresh token is gone (revoked, or 7 days old in testing mode).
+// invalid_grant: the refresh token is gone (revoked, or expired).
 export type GoogleFailureReason = 'network' | 'unauthorized' | 'invalid_grant' | 'api_disabled' | `${Purpose}_${number}` |
   `${Purpose}_invalid` | 'login_denied' | 'login_timeout' | `login_${string}`;
 
@@ -254,7 +254,7 @@ function deployment(what: 'create_deployment' | 'update_deployment' | 'list_depl
 }
 
 // Ends the CLI's grant: the refresh token and the access tokens it gave stop working. A token
-// already gone (revoked, or 7 days old in testing mode) counts as ended.
+// already gone (revoked, or expired) counts as ended.
 export async function revokeGoogle(fetch: Fetch, refreshToken: string): Promise<void> {
   const reply = await send(fetch, REVOKE, { method: 'POST', body: new URLSearchParams({ token: refreshToken }) });
   if (reply.status !== 200 && (reply.value as { error?: unknown } | null)?.error !== 'invalid_token') throw new GoogleFailure(`revoke_${reply.status}`);

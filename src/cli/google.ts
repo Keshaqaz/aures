@@ -41,7 +41,7 @@ export interface ConnectGoogleOptions {
 }
 
 // The Google grant of the CLI. A refresh token from the Keychain is used while Google takes it;
-// a gone one (testing mode keeps it 7 days) opens the sign-in again without a word about it.
+// a gone one (revoked or expired) opens the sign-in again without a word about it.
 export async function connectGoogle({ fetch, keychain, io, open, now, files, fresh = false, sign }: ConnectGoogleOptions): Promise<GoogleApi> {
   let token: string | null = null;
   if (!fresh) try { token = await keychain.read(); } catch (error) { if (!(error instanceof KeychainUnavailable)) throw error; }
