@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PassThrough } from 'node:stream';
 import { setup } from '../src/cli/setup.ts';
-import { openScreen, runScreen } from '../src/cli/screen.ts';
+import { openScreen, runScreen, viewport } from '../src/cli/screen.ts';
 import type { Screen } from '../src/cli/screen.ts';
 import { FILES } from '../src/worker/layout.ts';
 import { readRules } from '../src/worker/state-file.ts';
@@ -159,16 +159,36 @@ test('the terminal: the screen takes the alternate screen, redraws the lines tha
   assert.ok(written().endsWith('\x1b[?25h\x1b[?1049l'), 'the cursor and the terminal as it was are back');
 });
 
-test('the terminal: a frame taller than the terminal keeps its bottom and never scrolls it', async () => {
+test('the terminal: a frame taller than the terminal keeps its header and keys and never scrolls it', async () => {
   const { screen } = await opened();
   const { input, done, written } = terminal(screen, { columns: 100, rows: 8 });
-  const rows = [...written().matchAll(/\x1b\[(\d+);1H/g)].map(([, row]) => Number(row));
-  assert.equal(Math.max(...rows), 8);
-  assert.doesNotMatch(written(), /\n/, 'no line feed that could scroll the terminal');
-  assert.match(visible(written()), /↑↓ выбор/);
-  assert.doesNotMatch(visible(written()), /aures|СБРОСЫ/, 'the top gives way');
-  input.write('q');
-  assert.equal(await done, 0);
+  try {
+    const rows = [...written().matchAll(/\x1b\[(\d+);1H/g)].map(([, row]) => Number(row));
+    assert.equal(Math.max(...rows), 8);
+    assert.doesNotMatch(written(), /\n/, 'no line feed that could scroll the terminal');
+    assert.match(visible(written()), /aures/, 'the header stays');
+    assert.match(visible(written()), /↑↓ выбор/, 'the keys stay');
+    assert.match(visible(written()), /▸ reset-b/, 'the cursor is in view');
+    assert.match(visible(written()), /↓ ещё \d+/, 'a mark tells what is hidden below');
+  } finally {
+    input.write('q');
+    assert.equal(await done, 0);
+  }
+});
+
+// A frame taller than the terminal moves with the cursor (issue 33).
+test('viewport: the middle follows the cursor, the first item shows the top and the last the bottom', () => {
+  const frame = ['header', 'a', '▸ b', 'c', 'd', 'e', 'f', '', 'keys'];
+  const plain = (lines: string[]) => lines.map(line => line.replace(/\x1b\[[0-9;]*m/g, ''));
+  const first = viewport(frame, { rows: 7, foot: 2, offset: 0, edge: 'first' });
+  assert.deepEqual(plain(first.lines), ['header', '', 'a', '▸ b', '↓ ещё 4', '', 'keys']);
+  const down = ['header', 'a', 'b', 'c', '▸ d', 'e', 'f', '', 'keys'];
+  const middle = viewport(down, { rows: 7, foot: 2, offset: first.offset, edge: null });
+  assert.deepEqual(plain(middle.lines), ['header', '↑ ещё 2', 'c', '▸ d', '↓ ещё 2', '', 'keys']);
+  const last = viewport(['header', 'a', 'b', '▸ c', 'd', 'e', 'f', '', 'keys'], { rows: 7, foot: 2, offset: middle.offset, edge: 'last' });
+  assert.deepEqual(plain(last.lines), ['header', '↑ ещё 2', '▸ c', 'd', '↓ ещё 2', '', 'keys'], 'the cursor stays in view');
+  const fits = viewport(frame, { rows: 20, foot: 2, offset: 3, edge: null });
+  assert.deepEqual(fits, { lines: frame, offset: 0 });
 });
 
 test('the screen in English: l switches to Russian and back, keeping the choice on this Mac', async () => {

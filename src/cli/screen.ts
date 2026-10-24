@@ -10,6 +10,7 @@ import { openWorker } from './active-worker.ts';
 import type { Worker, OpenWorkerOptions } from './active-worker.ts';
 import type { Io, Rule, Sleep } from './common.ts';
 import { fit } from './fit.ts';
+import type { Segment } from './fit.ts';
 import { readOverview, renderOverview, overviewItems, sameItem, headerLine, paint, S, WIDTH } from './overview.ts';
 import type { Overview, Tone as OverviewTone } from './overview.ts';
 import { readWorkerPage, renderWorker, itemLabel, POLL_MS, workerItems, FIRST_ACTION } from './worker-screen.ts';
@@ -148,7 +149,10 @@ export class Screen {
   }
 
   // Lines of the frame, painted when color. fold folds the long ones under their text (issue
-  // 32), as the terminal needs; the lines themselves, as tests read them, stay whole.
+  // 32), as the terminal needs; the lines themselves, as tests read them, stay whole. footer is
+  // how many of the last lines are the foot: what an action said, its spinner or question, the
+  // keys — what a frame taller than the terminal keeps in view (issue 33).
+  footer = 0;
   frame(width = WIDTH, color = false, fold = color): string[] {
     const options = { now: this.now, timeZone: this.timeZone, width, toggle: true };
     let lines;
@@ -157,6 +161,7 @@ export class Screen {
         [headerLine(options)];
     } else if (this.model) lines = renderOverview(this.model, { ...options, cursor: this.cursor });
     else return [];
+    const body = lines.length;
     lines.push([]);
     for (const note of this.notes) lines.push([[note.text, note.tone ? TONES[note.tone] : '']]);
     if (this.notes.length) lines.push([]);
@@ -166,7 +171,18 @@ export class Screen {
         [t('y — yes, any other key — cancel', 'y — да, другая клавиша — отмена'), S.dim]]);
     } else lines.push([[this.view === 'worker' ? workerHint() : hint(), S.dim]]);
     // Long lines fold under their text, not at the terminal's edge (issue 32).
-    return (fold ? lines.flatMap(line => fit(line, width)) : lines).map(line => paint(line, color));
+    const folded = (part: Segment[][]) => fold ? part.flatMap(line => fit(line, width)) : part;
+    const head = folded(lines.slice(0, body)), foot = folded(lines.slice(body));
+    this.footer = foot.length;
+    return [...head, ...foot].map(line => paint(line, color));
+  }
+
+  // Where the cursor is among the items of the shown screen: on the first, on the last, or
+  // between them. A frame taller than the terminal shows its top or its bottom there (issue 33).
+  edge(): 'first' | 'last' | null {
+    const [at, count] = this.view === 'worker' ? [this.workerCursor, this.page ? workerItems(this.page).length : 0] :
+      [this.cursor, this.model ? overviewItems(this.model).length : 0];
+    return at === 0 ? 'first' : at === count - 1 ? 'last' : null;
   }
 
   // One key; resolves when what it started is done, to 'exit' when the screen closes.
@@ -436,6 +452,27 @@ export async function openScreen(options: ScreenCommandOptions): Promise<Screen>
   return screen;
 }
 
+// What of a frame taller than the terminal is shown (issue 33): the header on top and the foot
+// below stay, and the part between them moves with the cursor, the selected line (▸) always in
+// view — with the cursor on the first item the top shows, on the last the bottom (the journal of
+// the screen «Воркер»). Where lines are hidden a mark says how many. lines are the painted
+// lines of the frame, each one row; offset is where the middle started the last time.
+export function viewport(lines: string[], { rows, foot, offset, edge }: { rows: number; foot: number; offset: number;
+  edge: 'first' | 'last' | null }): { lines: string[]; offset: number } {
+  const head = 1, middle = lines.slice(head, lines.length - foot), room = rows - head - foot - 2;
+  if (lines.length <= rows || room < 1) return { lines, offset: 0 };
+  const selected = middle.findIndex(line => line.includes('▸'));
+  let start = edge === 'first' ? 0 : edge === 'last' ? middle.length - room : offset;
+  if (selected >= 0) start = Math.min(Math.max(start, selected - room + 1), selected);
+  start = Math.max(0, Math.min(start, middle.length - room));
+  // Blank lines are no lines a user misses.
+  const hidden = (part: string[]) => part.filter(line => line.trim()).length;
+  const above = hidden(middle.slice(0, start)), below = hidden(middle.slice(start + room));
+  const mark = (arrow: string, n: number) => n ? paint([[t(`${arrow} ${n} more`, `${arrow} ещё ${n}`), S.dim]], true) : '';
+  return { lines: [...lines.slice(0, head), mark('↑', above), ...middle.slice(start, start + room), mark('↓', below),
+    ...lines.slice(lines.length - foot)], offset: start };
+}
+
 // Rows of the terminal a painted line takes: a line longer than the terminal wraps.
 const rowsOf = (line: string, columns: number): number => Math.max(1, Math.ceil([...line.replace(/\x1b\[[0-9;]*m/g, '')].length / columns));
 
@@ -452,11 +489,16 @@ export interface Terminal {
 type Shown = { line: string; row: number; rows: number };
 export function runScreen(screen: Screen, { input, output }: Terminal): Promise<number> {
   let done = false, shown: Shown[] = [], bottom = 1; // the lines on the terminal with their rows, the row under them
+  let offset = 0; // where the middle of a frame taller than the terminal starts (issue 33)
   const draw = (full = false) => {
     if (done) return;
     const columns = output.columns || 80, width = Math.min(WIDTH, columns - 1 - MARGIN.length);
-    const lines = ['', ...screen.frame(width, true).map(line => MARGIN + line)];
-    // The top gives way: the action, its codes and the keys are at the bottom.
+    const frame = screen.frame(width, true);
+    // A frame taller than the terminal moves with the cursor; the blank line on top goes first.
+    const fitted = viewport(frame, { rows: (output.rows || 24) - 1, foot: screen.footer, offset, edge: screen.edge() });
+    offset = fitted.offset;
+    const lines = ['', ...fitted.lines.map(line => MARGIN + line)];
+    // A terminal too low even for that: the top gives way, the action, its codes and the keys are at the bottom.
     let height = lines.reduce((rows, line) => rows + rowsOf(line, columns), 0);
     while (height > (output.rows || 24) && lines.length > 1) height -= rowsOf(lines.shift() ?? '', columns);
     let row = 1, text = full ? '\x1b[2J' : '';
