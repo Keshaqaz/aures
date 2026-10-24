@@ -30,14 +30,19 @@ const scopeName = (scope: GoogleScope): string => ({
 })[scope];
 
 // files keeps the email of a new sign-in; fresh signs in anew even with a sign-in in the Keychain.
+// sign is setup's stage (issue 30): waiting arms, for the address googleLogin is about to open,
+// the one short hint of a user who takes longer than a moment and returns what ends it, and the
+// sign-in prints nothing of its own — the stage's ✓ says the account. Without sign everything
+// prints at once, as the screen and the switch show it.
 export interface ConnectGoogleOptions {
   fetch: Fetch; keychain: Keychain; io: Printer; open: OpenUrl; now: () => number;
   files?: Pick<WatchFiles, 'rememberAccount'>; fresh?: boolean;
+  sign?: { waiting(url: string): () => void };
 }
 
 // The Google grant of the CLI. A refresh token from the Keychain is used while Google takes it;
 // a gone one (testing mode keeps it 7 days) opens the sign-in again without a word about it.
-export async function connectGoogle({ fetch, keychain, io, open, now, files, fresh = false }: ConnectGoogleOptions): Promise<GoogleApi> {
+export async function connectGoogle({ fetch, keychain, io, open, now, files, fresh = false, sign }: ConnectGoogleOptions): Promise<GoogleApi> {
   let token: string | null = null;
   if (!fresh) try { token = await keychain.read(); } catch (error) { if (!(error instanceof KeychainUnavailable)) throw error; }
   if (token) {
@@ -48,15 +53,22 @@ export async function connectGoogle({ fetch, keychain, io, open, now, files, fre
     } catch (error) { if (!(error instanceof GoogleFailure && error.reason === 'invalid_grant')) throw error; }
   }
   for (;;) {
-    io.print(t('Sign in to Google in the browser. On the «Google hasn\'t verified this app» screen click «Continue», ' +
-      'then «Continue» again on the «Sign in to aures» screen.',
-    'Вход в Google в браузере. На экране «Эксперты Google не проверяли это приложение» нажмите «Продолжить», ' +
-      'затем ещё раз «Продолжить» на экране «Вход в сервис "aures"».'));
-    io.print(t('Then tick every box (or «Select all») and click «Continue».',
-      'Затем отметьте все галочки (или «Выбрать все») и нажмите «Продолжить».'));
+    if (!sign) {
+      io.print(t('Sign in to Google in the browser. On the «Google hasn\'t verified this app» screen click «Continue», ' +
+        'then «Continue» again on the «Sign in to aures» screen.',
+      'Вход в Google в браузере. На экране «Эксперты Google не проверяли это приложение» нажмите «Продолжить», ' +
+        'затем ещё раз «Продолжить» на экране «Вход в сервис "aures"».'));
+      io.print(t('Then tick every box (or «Select all») and click «Continue».',
+        'Затем отметьте все галочки (или «Выбрать все») и нажмите «Продолжить».'));
+    }
+    // The hint of a slow user ends when the sign-in does, whether the browser came back
+    // while open was still running or after it.
+    const hint: { stop: (() => void) | null } = { stop: null };
     try {
       const grant = await googleLogin({ fetch, now, open: url => {
-        io.print(t(`If the browser did not open: ${url}`, `Если браузер не открылся: ${url}`));
+        hint.stop?.();
+        if (sign) hint.stop = sign.waiting(url);
+        else io.print(t(`If the browser did not open: ${url}`, `Если браузер не открылся: ${url}`));
         return open(url);
       } });
       try { await keychain.write(grant.refreshToken); } catch (error) {
@@ -65,7 +77,7 @@ export async function connectGoogle({ fetch, keychain, io, open, now, files, fre
           'Не удалось сохранить вход в Связку ключей: в следующий раз Google попросит войти снова.'));
       }
       await files?.rememberAccount('google', grant.email);
-      io.print(grant.email ? t(`Signed in to Google as ${grant.email}.`, `Вы вошли в Google как ${grant.email}.`) :
+      if (!sign) io.print(grant.email ? t(`Signed in to Google as ${grant.email}.`, `Вы вошли в Google как ${grant.email}.`) :
         t('Signed in to Google.', 'Вы вошли в Google.'));
       return new GoogleApi({ fetch, now, refreshToken: grant.refreshToken, access: grant.access });
     } catch (error) {
@@ -74,7 +86,8 @@ export async function connectGoogle({ fetch, keychain, io, open, now, files, fre
         'Sign in again and tick these boxes.',
       `Google не дал доступ к: ${error.missing.map(scopeName).join(', ')}. Без него aures не установит воркер. ` +
         'Войдите снова и отметьте эти галочки.'));
-    }
+    } finally { hint.stop?.(); }
+    // The catch above left the loop going: the user signs in again with every box ticked.
   }
 }
 
@@ -111,11 +124,12 @@ export async function deployWorker({ api, secretKeychain, io, open, sleep, worke
       }
       if (!waiting) {
         waiting = true;
-        io.print(t(`Turn on the Apps Script API: ${USER_SETTINGS}`, `Включите API скрипта Google Apps: ${USER_SETTINGS}`));
-        io.print(t('On that page close the welcome dialog if it shows, open the line «Google Apps Script API» and click the switch. ' +
+        // Told at once (issue 30): without the switch the step cannot pass, so the user
+        // must know what to press before the wait can grow long.
+        io.print(t(`Turn on the Apps Script API: on ${USER_SETTINGS} open the line «Google Apps Script API» and click its switch. ` +
           'aures goes on by itself.',
-        'На этой странице закройте приветствие, если оно появится, откройте строку «API скрипта приложений Google Apps» и нажмите ' +
-          'переключатель. aures продолжит сам.'));
+        `Включите API скрипта Google Apps: на ${USER_SETTINGS} откройте строку «API скрипта приложений Google Apps» и нажмите переключатель. ` +
+          'aures продолжит сам.'));
         await open(USER_SETTINGS);
         io.wait(t('Waiting for the Apps Script API to be on…', 'Ждём, когда API скрипта Google Apps включится…'));
       }

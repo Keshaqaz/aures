@@ -509,7 +509,9 @@ test('a Google grant without the email scope is no broken grant: setup goes on a
   env.world.google.grantsEmail = false;
   const { code, io } = await env.run(setup, { answers: ['2', ''] });
   assert.equal(code, 0, io.output());
-  assert.match(io.output(), /\nВы вошли в Google\.\n/);
+  // The stage's ✓ names no account (issue 30): the grant gave no email to name.
+  assert.match(io.output(), /\[2\/4\] Вход в Google… ✓(\n|$)/);
+  assert.doesNotMatch(io.output(), /\[2\/4\] Вход в Google… ✓ \S/);
   assert.equal((await env.mac.files.readInstall())?.accounts?.google, undefined);
   let screen: Screen | undefined;
   await env.run(async options => { screen = await openScreen(options); return 0; });

@@ -189,8 +189,8 @@ async function finish(options: FinishSwitchOptions, old: Worker | null, email: s
   journal(t('Checking the new worker: a trial run…', 'Проверяем новый воркер: пробный запуск…'));
   try {
     const { io, now, sleep, timeZone } = options;
-    journal(worker.platform === 'github' ? await trialRun({ api: worker.api, repo: worker.repo, io, now, sleep, timeZone, paused: false }) :
-      trialLine(await worker.ask('trial') as unknown as Trial, timeZone));
+    journal(worker.platform === 'github' ? (await trialRun({ api: worker.api, repo: worker.repo, io, now, sleep, timeZone, paused: false })).line :
+      trialLine(await worker.ask('trial') as unknown as Trial, timeZone).line);
   } catch (error) {
     const why = explain(error);
     if (why === null) throw error;

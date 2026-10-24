@@ -47,8 +47,6 @@ function localStamp(date = new Date()): string {
   const local = new Date(date.getTime() + offset * 60_000).toISOString().slice(0, 19);
   return `${local}${offset < 0 ? '-' : '+'}${pad(Math.floor(Math.abs(offset) / 60))}:${pad(Math.abs(offset) % 60)}`;
 }
-const COMMANDS: Record<string, Command> = { setup: withBundle(setup), status, 'apply-now': applyNow, rules, login,
-  upgrade: withBundle(upgrade), uninstall };
 // The launchd agent runs `watch`; it is not in the usage. A locked Keychain may ask for the
 // password in a dialog nobody sees, so the agent waits for it briefly.
 const WATCH_KEYCHAIN_MS = 10_000;
@@ -94,8 +92,27 @@ async function main(): Promise<number> {
     return 0;
   }
   const tty = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+  const color = Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
+  // The screen, opened by `aures` without a command — and by a setup that succeeded in a
+  // terminal (issue 30), which hands it to setup as openScreen. Outside a terminal setup ends
+  // as any other command, and so the screen never opens in pipes and tests.
+  const openMainScreen = async (): Promise<number> => {
+    // A question before the screen opens (where the worker is) gets a line of its own.
+    const prompt = async (question: string) => {
+      const line = createInterface({ input: process.stdin, output: process.stdout });
+      try { return await line.question(question); } finally { line.close(); }
+    };
+    const io = { print: (line: string) => console.log(line), prompt, color };
+    // «Починить» on the screen «Воркер» deploys the bundles; without them it says so.
+    const [workerSource = null, appsScriptSource = null] = await readBundles();
+    // An action that Ctrl-C left unfinished must not keep the process alive.
+    process.exit(await screen({ fetch: globalThis.fetch, ...access(), io, workerSource, appsScriptSource,
+      mac: { files, agent: new LaunchAgent() }, terminal: { input: process.stdin, output: process.stdout } }));
+  };
+  const commands: Record<string, Command> = { setup: withBundle(options => setup({ ...options, ...(tty ? { openScreen: openMainScreen } : {}) })),
+    status, 'apply-now': applyNow, rules, login, upgrade: withBundle(upgrade), uninstall };
   // Outside a terminal the screen is printed once, as `status`.
-  const run = name === undefined ? tty ? 'screen' : status : Object.hasOwn(COMMANDS, name) ? COMMANDS[name] ?? null : name === 'watch' ? 'watch' : null;
+  const run = name === undefined ? tty ? 'screen' : status : Object.hasOwn(commands, name) ? commands[name] ?? null : name === 'watch' ? 'watch' : null;
   if (!run || rest.length) {
     console.error(usage());
     return 2;
@@ -109,20 +126,7 @@ async function main(): Promise<number> {
       secretKeychain: new KeychainEntry(WORKER_SECRET_ACCOUNT, { timeoutMs: WATCH_KEYCHAIN_MS }),
       files, log: line => console.log(`${localStamp()} ${line}`) });
   }
-  const color = Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
-  if (run === 'screen') {
-    // A question before the screen opens (where the worker is) gets a line of its own.
-    const prompt = async (question: string) => {
-      const line = createInterface({ input: process.stdin, output: process.stdout });
-      try { return await line.question(question); } finally { line.close(); }
-    };
-    const io = { print: (line: string) => console.log(line), prompt, color };
-    // «Починить» on the screen «Воркер» deploys the bundles; without them it says so.
-    const [workerSource = null, appsScriptSource = null] = await readBundles();
-    // An action that Ctrl-C left unfinished must not keep the process alive.
-    process.exit(await screen({ fetch: globalThis.fetch, ...access(), io, workerSource, appsScriptSource,
-      mac: { files, agent: new LaunchAgent() }, terminal: { input: process.stdin, output: process.stdout } }));
-  }
+  if (run === 'screen') return await openMainScreen();
   const terminal = createInterface({ input: process.stdin, output: process.stdout });
   const { print, wait } = liveLine(process.stdout, { color });
   const io = { print, wait, prompt: (question: string) => terminal.question(question), color };

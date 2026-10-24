@@ -312,9 +312,9 @@ export class Screen {
   // «Проверить сейчас»: the trial run, which reads the resets and applies nothing.
   async trial(io: Io): Promise<string> {
     const { worker, now, sleep, timeZone } = this;
-    if (worker.platform === 'google') return trialLine(await worker.ask('trial') as unknown as Trial, timeZone);
+    if (worker.platform === 'google') return trialLine(await worker.ask('trial') as unknown as Trial, timeZone).line;
     const paused = (await this.mac.files.readInstall())?.paused === true;
-    return trialRun({ api: worker.api, repo: worker.repo, io, now, sleep, timeZone, paused });
+    return (await trialRun({ api: worker.api, repo: worker.repo, io, now, sleep, timeZone, paused })).line;
   }
 
   // «Починить»; on Google the screen goes on with the worker that answers to the new secret.

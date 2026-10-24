@@ -102,6 +102,104 @@ export const showCode = (io: Printer, open: OpenUrl, copy: CopyText) =>
 export const formatTime = (ms: number, timeZone?: string): string => new Intl.DateTimeFormat(t('en-GB', 'ru-RU'), { day: 'numeric', month: 'long', year: 'numeric',
   hour: '2-digit', minute: '2-digit', timeZone, timeZoneName: 'short' }).format(ms);
 
+// ─── The stages of setup (issue 30) ────────────────────────────────────────────
+
+// How long a stage waits for the user before its one hint line appears (issue 30): a user
+// this quick never sees the buttons or the address, only the stage lines.
+export const HINT_AFTER_MS = 30_000;
+// How often the wait is looked at. Real ticks, so nothing the CLI itself waits for — the
+// browser, the loopback server of a sign-in — is ever starved while the wait is measured.
+const HINT_TICK_MS = 50;
+
+// One line a stage shows only when its wait for the user outlasts HINT_AFTER_MS (issue 30).
+// The wait itself is measured by the injected now: a test on the fake world moves its clock
+// and sees the line after the delay, and never before it. stop() ends the wait — the user
+// was quick — and ends it silently.
+export interface SlowHint { stop(): void }
+export function slowHint(io: Printer, line: string, { now }: { now: () => number }, after = HINT_AFTER_MS): SlowHint {
+  let stopped = false;
+  (async () => {
+    const started = now();
+    while (!stopped && now() - started < after) {
+      await new Promise(resolve => { setTimeout(resolve, HINT_TICK_MS).unref?.(); });
+    }
+    if (!stopped) io.print(line);
+  })();
+  return { stop: () => { stopped = true; } };
+}
+
+// The stages of setup (issue 30): one line each. While a stage runs its `[n/N] Name…` is the
+// live line — whatever the stage waits for takes the line for a while and gives it back —
+// and when the stage is done the same line is printed with ✓, and with what the stage got
+// when it names something. A note (the code of a device login) becomes part of the line at
+// once: it is the one thing the user must not miss.
+export interface StageRun {
+  note(text: string): void;
+  done(summary?: string): void;
+}
+export class Stages {
+  private n = 0;
+  private readonly io: Io;
+  private readonly total: number;
+  constructor(io: Io, total: number) {
+    this.io = io;
+    this.total = total;
+  }
+
+  // A stage that runs.
+  begin(name: string): StageRun {
+    this.n++;
+    let note: string | null = null;
+    const live = () => `[${this.n}/${this.total}] ${name}${note === null ? '' : `: ${note}`}…`;
+    this.io.wait(live());
+    return {
+      note: text => { note = text; this.io.wait(live()); },
+      done: summary => {
+        this.io.wait(null);
+        this.io.print(`[${this.n}/${this.total}] ${name}${note === null ? '…' : `: ${note}`} ✓${summary ? ` ${summary}` : ''}`);
+      },
+    };
+  }
+
+  // A stage that needs no waiting, as the platform, chosen before the stages began.
+  line(name: string, summary: string): void {
+    this.n++;
+    this.io.print(`[${this.n}/${this.total}] ${name}: ${summary}`);
+  }
+}
+
+// The code of a device login as a stage of setup shows it (issue 30): the code goes into the
+// stage line at once, and the page's address waits with the slow hint — printed only if the
+// user takes longer than a moment, for a browser that did not open. ended() is for when the
+// login is over, succeeded or not; neither failure of open nor of the clipboard ends it.
+export interface StagedCode {
+  onCode(code: DeviceCode): Promise<void>;
+  ended(): void;
+}
+export function stagedCode(stage: StageRun, io: Printer, open: OpenUrl, copy: CopyText, now: () => number): StagedCode {
+  let hint: SlowHint | null = null;
+  return {
+    async onCode({ userCode, verificationUrl }) {
+      let copied = false;
+      try { copied = await copy(userCode); } catch { /* the code is in the stage line anyway */ }
+      stage.note(t(`code ${userCode}${copied ? ' (copied)' : ''}`, `код ${userCode}${copied ? ' (скопирован)' : ''}`));
+      hint?.stop();
+      hint = slowHint(io, t(`If the browser did not open: ${verificationUrl}`, `Если браузер не открылся: ${verificationUrl}`), { now });
+      try { await open(verificationUrl); } catch { /* the address comes with the hint */ }
+    },
+    ended() { hint?.stop(); hint = null; },
+  };
+}
+
+// What a successful setup ends with (issue 30): one line — the screen it opens next shows
+// the resets and the rules themselves. resets is null when the worker has not read them yet,
+// with busy telling that ChatGPT was the reason.
+export const doneLine = (resets: number | null, busy = false): string => resets !== null ?
+  t(`Done. Resets: ${resets}.`, `Готово. Сбросов: ${resets}.`) :
+  busy ? t('Done. ChatGPT is temporarily unavailable; the worker will read the resets on its next run.',
+    'Готово. ChatGPT временно недоступен; воркер прочитает сбросы при следующем запуске.') :
+  t('Done. The worker will read the resets on its next run.', 'Готово. Воркер прочитает сбросы при следующем запуске.');
+
 // The two general rules as the user reads them in rules, status and the screen. The
 // before-expiry window is the platform's (ADR-0007).
 export const ruleLabel = (rule: Rule, platform: Platform = 'github'): string => ({
@@ -136,9 +234,12 @@ export const deadline = (reset: Expiring, timeZone?: string): string => reset.ex
 export const byDeadline = <T extends Expiring>(resets: T[]): T[] => [...resets].sort((a, b) =>
   (a.expiresAt ? Date.parse(a.expiresAt) : Infinity) - (b.expiresAt ? Date.parse(b.expiresAt) : Infinity));
 
-// fresh signs in anew even with a sign-in in the Keychain.
-export async function connectGitHub({ fetch, keychain, io, open, copy, now, sleep, fresh = false }:
-  { fetch: Fetch; keychain: Keychain; io: Printer; open: OpenUrl; copy: CopyText; now: () => number; sleep: Sleep; fresh?: boolean }): Promise<GitHub> {
+// fresh signs in anew even with a sign-in in the Keychain. onCode shows the device code —
+// setup passes the code line of its stage (issue 30) — and quiet leaves the telling to it:
+// the stage's line says the sign-in, its ✓ the account.
+export async function connectGitHub({ fetch, keychain, io, open, copy, now, sleep, fresh = false, onCode, quiet = false }:
+  { fetch: Fetch; keychain: Keychain; io: Printer; open: OpenUrl; copy: CopyText; now: () => number; sleep: Sleep;
+    fresh?: boolean; onCode?: (code: DeviceCode) => unknown; quiet?: boolean }): Promise<GitHub> {
   let token: string | null = null;
   if (!fresh) try { token = await keychain.read(); } catch (error) { if (!(error instanceof KeychainUnavailable)) throw error; }
   if (token) {
@@ -148,8 +249,8 @@ export async function connectGitHub({ fetch, keychain, io, open, copy, now, slee
       io.print(t('The GitHub sign-in has expired, sign in again.', 'Вход в GitHub устарел, войдите снова.'));
     }
   }
-  io.print(t('Sign in to GitHub.', 'Вход в GitHub.'));
-  token = await githubDeviceLogin({ fetch, now, sleep, onCode: showCode(io, open, copy) });
+  if (!quiet) io.print(t('Sign in to GitHub.', 'Вход в GitHub.'));
+  token = await githubDeviceLogin({ fetch, now, sleep, onCode: onCode ?? showCode(io, open, copy) });
   const api = new GitHubApi({ fetch, token });
   const login = await api.login();
   try { await keychain.write(token); } catch (error) {
@@ -157,7 +258,7 @@ export async function connectGitHub({ fetch, keychain, io, open, copy, now, slee
     io.print(t('Could not save the sign-in to the Keychain: GitHub will ask you to sign in again next time.',
       'Не удалось сохранить вход в Связку ключей: в следующий раз GitHub попросит войти снова.'));
   }
-  io.print(t(`Signed in to GitHub as ${login}.`, `Вы вошли в GitHub как ${login}.`));
+  if (!quiet) io.print(t(`Signed in to GitHub as ${login}.`, `Вы вошли в GitHub как ${login}.`));
   return { api, login };
 }
 

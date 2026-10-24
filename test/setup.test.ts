@@ -40,11 +40,21 @@ test('setup goes from nothing to a working worker in a private repository', asyn
   assert.deepEqual(state.observed?.resets.map(r => r.id).sort(), ['reset-a', 'reset-b']);
 
   assert.equal(keychain.entries.size, 1);
-  assert.match(io.output(), /https:\/\/github\.com\/login\/device/);
-  assert.match(io.output(), /https:\/\/auth\.openai\.com\/codex\/device/);
+  // The codes of both device logins live in their stage lines (issue 30); the addresses wait
+  // for a slow user, so none of them is printed here.
+  assert.match(io.output(), /\[2\/5\] Вход в GitHub: код GHFK-\d+ \(скопирован\) ✓ octo-fake/);
+  assert.match(io.output(), /\[4\/5\] Вход в ChatGPT: код FAKE-\d+ \(скопирован\) ✓/);
+  assert.doesNotMatch(io.output(), /Если браузер не открылся/);
   assert.match(io.output(), /Перед истечением \(в последние 8 часов\) — включено/);
   assert.match(io.output(), /Когда кончится недельный лимит — выключено/);
-  assert.match(io.lines.at(-1) ?? '', /^Воркер работает\. Сбросов: 2, ближайший истекает 22 октября 2026 г\. в 15:00 UTC\. Сейчас применять нечего\.$/);
+  assert.deepEqual(io.lines.filter(line => /^\[\d\/5\]/.test(line)), [
+    '[1/5] Площадка: 1. GitHub Actions',
+    '[2/5] Вход в GitHub: код GHFK-1001 (скопирован) ✓ octo-fake',
+    '[3/5] Репозиторий воркера… ✓',
+    '[4/5] Вход в ChatGPT: код FAKE-1000 (скопирован) ✓',
+    '[5/5] Воркер в GitHub… ✓',
+  ], io.output());
+  assert.equal(io.lines.at(-1), 'Готово. Сбросов: 2.');
   assert.deepEqual(world.violations, []);
   assert.deepEqual(world.github.violations, []);
 });
@@ -60,8 +70,9 @@ test('end to end: the worker setup committed runs on plain node and ticks on the
   assert.match(world.github.text(repo, FILES.worker), /^\/\/ aures worker /);
   assert.match(repo.runs[0]?.log ?? '', /Z would_apply: before_expiry reset-due\n$/);
   // The before-expiry rule setup wrote reached the worker: the trial run names the reset due
-  // in 3 hours and leaves it to a regular run.
-  assert.match(io.lines.at(-1) ?? '', /Сейчас правила применили бы сброс reset-due \(перед истечением\)\.$/);
+  // in 3 hours and leaves it to a regular run; the verdict is in the run's log, the last
+  // line of setup is short (issue 30).
+  assert.equal(io.lines.at(-1), 'Готово. Сбросов: 3.');
   const summary: Summary = JSON.parse(world.github.text(repo, FILES.summary));
   assert.equal(summary.lastApplied, null);
   assert.deepEqual(summary.rules, { beforeExpiry: true, weeklyAutoApply: false });
@@ -76,7 +87,7 @@ test('the trial run of setup names the reset the rules would apply and spends no
   world.chatgpt.credits.push(credit('RateLimitResetCredit_0eb466b3212c819193799a1741f067f8', world.now + 2 * HOUR));
   const { code, io } = await run();
   assert.equal(code, 0, io.output());
-  assert.match(io.lines.at(-1) ?? '', /^Воркер работает\. Сбросов: 3, .* Сейчас правила применили бы сброс RES67F8 \(перед истечением\)\.$/);
+  assert.equal(io.lines.at(-1), 'Готово. Сбросов: 3.');
   assert.deepEqual(world.consumeCalls(), []);
 });
 
@@ -116,7 +127,7 @@ test('a repeated setup finds the repository and keeps the state, rules and cron 
   // The worker's is the first session; the second is this Mac's, for the weekly rule.
   assert.equal(state.session.refreshToken, world.auth.sessions[0]?.refresh);
   assert.equal(repo.runs.length, 2);
-  assert.match(io.lines.at(-1) ?? '', /^Воркер работает\. Сбросов: 2/);
+  assert.equal(io.lines.at(-1), 'Готово. Сбросов: 2.');
   assert.equal(keychain.entries.size, 1);
 });
 
@@ -153,7 +164,7 @@ for (const [label, path, logins] of [
     assert.equal(world.requests.filter(r => r.path.endsWith('/deviceauth/usercode')).length, logins, 'ChatGPT logins');
     const state = openState(world.github.text(repo, FILES.state), world.github.secret(repo, STATE_KEY_SECRET));
     assert.equal(state.session.refreshToken, world.auth.current?.refresh);
-    assert.match(second.io.lines.at(-1) ?? '', /^Воркер работает\./);
+    assert.match(second.io.lines.at(-1) ?? '', /^Готово\./);
   });
 }
 
@@ -178,7 +189,7 @@ test('a state left without its key is replaced through a new ChatGPT login', asy
   repo.secrets.delete(STATE_KEY_SECRET);
   const { code, io } = await run({ answers: [] });
   assert.equal(code, 0);
-  assert.match(io.output(), /auth\.openai\.com\/codex\/device/);
+  assert.match(io.output(), /\[4\/5\] Вход в ChatGPT: код FAKE-\d+ \(скопирован\) ✓/);
   assert.ok(openState(world.github.text(repo, FILES.state), world.github.secret(repo, STATE_KEY_SECRET)));
 });
 
@@ -210,7 +221,7 @@ test('a trial run that cannot open the state tells to delete it and run setup ag
   repo.files.delete(FILES.state);
   const again = await run({ answers: [] });
   assert.equal(again.code, 0);
-  assert.match(again.io.lines.at(-1) ?? '', /^Воркер работает\./);
+  assert.equal(again.io.lines.at(-1), 'Готово. Сбросов: 2.');
 });
 
 test('a trial run still queued after 10 minutes is left for the user to check', async () => {
@@ -231,8 +242,9 @@ test('setup waits out the GitHub queue and says on the live line what it waits f
   world.github.queueMs = 3 * 60_000;
   const { code, io } = await run();
   assert.equal(code, 0, io.output());
-  assert.deepEqual(io.waits, [STARTING, QUEUED, null]);
-  assert.match(io.lines.at(-1) ?? '', /^Воркер работает\./);
+  assert.deepEqual(io.waits.filter(text => text !== null).slice(-2), [STARTING, QUEUED]);
+  assert.equal(io.waits.at(-1), null);
+  assert.match(io.lines.at(-1) ?? '', /^Готово\./);
 });
 
 test('polls GitHub drops or fails while the run is queued do not end setup', async () => {
@@ -243,9 +255,11 @@ test('polls GitHub drops or fails while the run is queued do not end setup', asy
   const { code, io } = await run();
   assert.equal(code, 0, io.output());
   // The run GitHub named is polled from the first poll on, so the failures meet it at once.
-  assert.deepEqual(io.waits, [STARTING, 'GitHub не отвечает, продолжаем ждать…', QUEUED, null]);
+  assert.deepEqual(io.waits.filter(text => text !== null).slice(-3),
+    [STARTING, 'GitHub не отвечает, продолжаем ждать…', QUEUED]);
+  assert.equal(io.waits.at(-1), null);
   assert.equal(world.github.repo()?.runs.length, 1, 'the worker is dispatched once');
-  assert.match(io.lines.at(-1) ?? '', /^Воркер работает\./);
+  assert.match(io.lines.at(-1) ?? '', /^Готово\./);
 });
 
 test('setup waits until GitHub knows the freshly pushed workflow', async () => {
@@ -295,7 +309,7 @@ test('a revoked token in the Keychain is replaced through a new GitHub login', a
   world.github.tokens.delete(old);
   const { code, io } = await run({ answers: [] });
   assert.equal(code, 0);
-  assert.match(io.output(), /Вход в GitHub устарел[\s\S]*github\.com\/login\/device/);
+  assert.match(io.output(), /Вход в GitHub устарел/);
   assert.notEqual(keychain.entries.get('github'), old);
   assert.ok(world.github.tokens.has(keychain.entries.get('github') ?? ''));
 });
@@ -316,4 +330,26 @@ test('the GitHub login waits as GitHub asks and stops when the user denies acces
   assert.equal(result.code, 1);
   assert.match(result.io.lines.at(-1) ?? '', /Время на ввод кода GitHub вышло/);
   assert.ok(polls > 80 && polls < 92, `${polls} polls in 15 minutes at 10 s`);
+});
+
+// A successful setup in a terminal opens the screen (issue 30): main hands setup openScreen
+// only when stdout is a terminal, so pipes and tests without it never see the screen. Here the
+// hook is injected, as main injects it — no real terminal is needed.
+test('a successful setup opens the screen when the terminal asks for it; a failure does not', async () => {
+  const { run } = await installWorld();
+  const opened: string[] = [];
+  const { code, io } = await run({ answers: ['1', ''], openScreen: async () => { opened.push('screen'); return 0; } });
+  assert.equal(code, 0, io.output());
+  assert.deepEqual(opened, ['screen'], 'the screen opened once, after the setup');
+  assert.equal(io.lines.at(-2), 'Готово. Сбросов: 2.');
+  assert.equal(io.lines.at(-1), 'Открываю aures…');
+
+  // A failed setup never opens it, whatever the terminal.
+  const failing = await installWorld();
+  failing.world.github.fail = () => Promise.reject(new TypeError('fetch failed'));
+  const never: string[] = [];
+  const failed = await failing.run({ answers: ['1', ''], openScreen: async () => { never.push('screen'); return 0; } });
+  assert.equal(failed.code, 1);
+  assert.deepEqual(never, []);
+  assert.doesNotMatch(failed.io.output(), /Открываю aures/);
 });

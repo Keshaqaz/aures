@@ -22,7 +22,8 @@ export const WORKER_SOURCE = '// fake worker bundle\n';
 
 // The user at the terminal: approves each device code as soon as it is shown and answers
 // prompts from a script (an empty line is Enter). waits are the texts of the live line, null
-// where it went away.
+// where it went away; a code shown as the live line — the stage line of setup (issue 30) — is
+// entered as soon as one shown by print.
 export interface Terminal extends Io {
   lines: string[];
   asked: string[];
@@ -33,14 +34,17 @@ export type CliFakeWorld = FakeWorld & { github: FakeGitHub; google: FakeGoogle 
 
 export function terminal(world: CliFakeWorld, answers: string[] = [], { github = true }: { github?: Approval } = {}): Terminal {
   const lines: string[] = [], asked: string[] = [], waits: (string | null)[] = [];
+  const shown = (text: string | null): void => {
+    for (const [code] of (text ?? '').matchAll(/GHFK-\d+/g)) world.github.approve(code, github);
+    for (const [code] of (text ?? '').matchAll(/FAKE-\d+/g)) world.approve(code);
+  };
   return {
     lines, asked, waits,
-    wait: text => { waits.push(text); },
+    wait: text => { waits.push(text); shown(text); },
     output: () => lines.join('\n'),
     print: line => {
       lines.push(line);
-      for (const [code] of line.matchAll(/GHFK-\d+/g)) world.github.approve(code, github);
-      for (const [code] of line.matchAll(/FAKE-\d+/g)) world.approve(code);
+      shown(line);
     },
     prompt: async question => {
       asked.push(question);
@@ -70,7 +74,7 @@ export interface WorldOptions extends CommandOptions {
   random: () => number;
   rulesMigrations?: Migration[];
 }
-export type RunOptions = Partial<WorldOptions> & { answers?: string[]; github?: Approval };
+export type RunOptions = Partial<WorldOptions> & { answers?: string[]; github?: Approval; openScreen?: () => Promise<number> };
 export interface CliWorld {
   world: CliFakeWorld;
   keychain: FakeKeychain;
