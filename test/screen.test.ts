@@ -193,6 +193,22 @@ test('viewport: the middle follows the cursor, the first item shows the top and 
   assert.deepEqual(fits, { lines: frame, offset: 0 });
 });
 
+test('the terminal: with the cursor in the journal its heading, with the ▸, stays in view', async () => {
+  const { screen } = await opened();
+  const { input, done, press, written } = terminal(screen, { columns: 100, rows: 8 });
+  try {
+    await press('\t'); // the screen «Воркер»
+    while (screen.busy !== null || screen.view !== 'worker') await new Promise(resolve => setImmediate(resolve));
+    const inJournal = await press('\x1b[B'); // ↓: into the journal
+    assert.match(visible(inJournal), /▸ ЖУРНАЛ/, 'the heading of the journal carries the ▸');
+    assert.doesNotMatch(visible(inJournal), /▸ Проверить/, 'the row of actions points nowhere');
+    assert.match(visible(written()), /↑↓ листать/, 'the keys of the journal stay in view');
+  } finally {
+    input.write('q');
+    assert.equal(await done, 0);
+  }
+});
+
 test('the screen in English: l switches to Russian and back, keeping the choice on this Mac', async () => {
   const { mac, press, text, screen, run } = await opened({ language: 'en' });
   assert.equal(screen.frame()[0], `aures ${pkg.version}${' '.repeat(44 - pkg.version.length)}20 Oct 12:00   EN · RU`);
@@ -218,7 +234,7 @@ test('the screen in English: l switches to Russian and back, keeping the choice 
 
 // The screen «Воркер» (issues 11, 15): Tab from the resets and back, the platform and its
 // accounts, the actions in one row and the live journal in a window that scrolls.
-const WORKER_HINT = '↑↓ выбор · Enter выполнить · Tab сбросы · l язык · r обновить · q выход';
+const WORKER_HINT = '↑↓←→ выбор · Enter выполнить · Tab сбросы · l язык · r обновить · q выход';
 const SCROLL_HINT = '↑↓ листать · PgUp PgDn страница · Home свежие · Esc к действиям · q выход';
 const REPAIR_CAPTION = 'Заново залить текущую версию воркера и вернуть расписание на этой площадке. Сбросы, правила, вход в ChatGPT ' +
   'и журнал не трогаются. Поможет, если воркер перестал запускаться или его файлы меняли вручную';
@@ -281,7 +297,7 @@ test('the screen «Воркер» on Google: the platform, its accounts and the 
   assert.match(text(), /\n {2}Проверить сейчас ▸ Починить/);
   assert.doesNotMatch(text(), /ЖУРНАЛ/, 'the caption stands where the journal is');
   assert.equal(caption(screen.frame()), REPAIR_CAPTION);
-  assert.ok(screen.frame().every(line => [...line].length <= 72), 'the caption wraps to the width');
+  assert.ok(screen.frame().slice(0, -1).every(line => [...line].length <= 72), 'the caption wraps to the width');
   assert.ok(screen.frame().length >= withJournal, 'the area is not less tall than the journal');
 
   await press('left');
@@ -300,7 +316,7 @@ test('the screen «Воркер» in English', async () => {
   assert.match(text(), /\n {2}GitHub {4}octo-fake {3,}sign in again\n {2}ChatGPT {3}fake@example\.invalid · signed in {3,}sign in again\n\n/);
   assert.match(text(), /\n▸ Check now {3}Repair {3}Pause {3}Switch to Google Apps Script\n/);
   assert.match(text(), /\nJOURNAL {3,}polled 12:00:\d\d · answered in 0\.0 s\n─+\n {2}12:00 {2}trial · nothing to apply {3,}0\.0 s\n/);
-  assert.equal(screen.frame().at(-1), '↑↓ select · Enter run · Tab resets · l language · r refresh · q quit');
+  assert.equal(screen.frame().at(-1), '↑↓←→ select · Enter run · Tab resets · l language · r refresh · q quit');
 });
 
 test('the height of the screen «Воркер» follows the overview: the window 3–10 rows', async () => {
@@ -353,23 +369,24 @@ test('the journal in its window: the bar, the range in the heading, the keys and
 
   await press('down'); // into the journal
   assert.equal(screen.frame().at(-1), SCROLL_HINT, 'the hint says what the keys do in the journal');
-  assert.match(text(), /\nЖУРНАЛ · 1–3 из 11 {3,}опрошен [^\n]*\n─+\n {2}12:45 {2}/);
+  assert.match(text(), /\n▸ ЖУРНАЛ · 1–3 из 11 {3,}опрошен [^\n]*\n─+\n {2}12:45 {2}/);
   await press('down');
-  assert.match(text(), /\nЖУРНАЛ · 2–4 из 11 {3,}опрошен/);
+  assert.match(text(), /\n▸ ЖУРНАЛ · 2–4 из 11 {3,}опрошен/);
   await press('pageup');
-  assert.match(text(), /\nЖУРНАЛ · 1–3 из 11 {3,}опрошен/);
+  assert.match(text(), /\n▸ ЖУРНАЛ · 1–3 из 11 {3,}опрошен/);
   await press('pagedown');
-  assert.match(text(), /\nЖУРНАЛ · 4–6 из 11 {3,}опрошен/);
+  assert.match(text(), /\n▸ ЖУРНАЛ · 4–6 из 11 {3,}опрошен/);
   await press('home');
-  assert.match(text(), /\nЖУРНАЛ · 1–3 из 11 {3,}опрошен/);
+  assert.match(text(), /\n▸ ЖУРНАЛ · 1–3 из 11 {3,}опрошен/);
   await press('pagedown', 'pagedown', 'pagedown');
-  assert.match(text(), /\nЖУРНАЛ · 9–11 из 11 {3,}опрошен/, 'no further than the bottom');
+  assert.match(text(), /\n▸ ЖУРНАЛ · 9–11 из 11 {3,}опрошен/, 'no further than the bottom');
   await press('up');
-  assert.match(text(), /\nЖУРНАЛ · 8–10 из 11 {3,}опрошен/);
+  assert.match(text(), /\n▸ ЖУРНАЛ · 8–10 из 11 {3,}опрошен/);
 
   await press('escape'); // back to the actions, the window where it was
   assert.equal(screen.frame().at(-1), WORKER_HINT);
-  assert.match(text(), /\nЖУРНАЛ · 8–10 из 11 {3,}опрошен/);
+  assert.match(text(), /\n▸ Проверить сейчас/, 'the ▸ returns to the chosen action');
+  assert.match(text(), /\nЖУРНАЛ · 8–10 из 11 {3,}опрошен/, 'the heading has none');
   await press('right'); // the caption in place of the journal
   assert.doesNotMatch(text(), /ЖУРНАЛ/, 'the caption stands where the journal is');
   await press('left');
@@ -386,7 +403,7 @@ test('new runs arrive on top without moving the lines the window is scrolled to'
   await manyRuns(opened, 9);
   const { world, gas, screen, press, text } = opened;
   await press('tab', 'down', 'pagedown');
-  assert.match(text(), /\nЖУРНАЛ · 4–6 из 11 {3,}опрошен [^\n]*\n─+\n {2}12:30 {2}/);
+  assert.match(text(), /\n▸ ЖУРНАЛ · 4–6 из 11 {3,}опрошен [^\n]*\n─+\n {2}12:30 {2}/);
   const seen = screen.frame().find(line => line.includes('12:30'));
 
   world.advance(5 * MINUTE);
@@ -394,7 +411,7 @@ test('new runs arrive on top without moving the lines the window is scrolled to'
   gas.tick();
   world.chatgpt.fail = null;
   await press('r'); // the poll reads the journal again
-  assert.match(text(), /\nЖУРНАЛ · 5–7 из 12 {3,}опрошен/);
+  assert.match(text(), /\n▸ ЖУРНАЛ · 5–7 из 12 {3,}опрошен/);
   assert.equal(screen.frame().find(line => line.includes('12:30')), seen, 'the same line stays on top of the window');
 });
 

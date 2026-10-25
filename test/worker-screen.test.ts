@@ -143,7 +143,7 @@ test('the window scrolls in visual lines, with a bar beside what is in view', ()
   assert.equal(lines[15]?.slice(-3), '  │');
 
   const scrolled = plain(render(p, { rows: 3, offset: 2, focus: true }));
-  assert.match(scrolled[11] ?? '', /^ЖУРНАЛ · 3–5 из 6 {3,}опрошен/);
+  assert.match(scrolled[11] ?? '', /^▸ ЖУРНАЛ · 3–5 из 6 {3,}опрошен/);
   assert.match(scrolled[13] ?? '', /^ {2}12:15 {2}/);
   assert.equal(scrolled[13]?.slice(-3), '  │');
   assert.equal(scrolled[14]?.slice(-3), '  ┃');
@@ -181,6 +181,23 @@ test('the caption of «Починить» or «Переключиться» stan
   const switching = plain(render(page(), { cursor: 5 }));
   assert.match(switching[11] ?? '', /^ {4}Воркер на GitHub Actions готовится/);
   assert.doesNotMatch(switching.join('\n'), /ЖУРНАЛ/);
+});
+
+test('with the cursor in the journal the ▸ stands at its heading, and no action is pointed at', () => {
+  const entries = ['12:00', '12:05', '12:10', '12:15', '12:20', '12:25']
+    .map((time, i) => run(time, i % 2 ? 'mac' : 'scheduled', 'idle'));
+  const p = page({ journal: { entries, readAt: NOW, responseMs: 400 } });
+  const row = '  Проверить сейчас   Починить   Пауза   Переключиться на GitHub Actions';
+  const lines = render(p, { rows: 3, offset: 2, focus: true });
+  assert.deepEqual(lines[11]?.[0], ['▸ ', S.cyan]);
+  assert.equal(plain(lines)[9], row, 'the row points nowhere');
+  assert.match(plain(lines)[6] ?? '', /^ {2}Google /, 'nor do the accounts');
+
+  // Off the journal the ▸ returns to the chosen action and the heading has none.
+  const back = render(p, { rows: 3, offset: 2 });
+  assert.equal(plain(back)[9], '▸ ' + row.slice(2));
+  assert.match(plain(back)[11] ?? '', /^ЖУРНАЛ · 3–5 из 6 {3,}опрошен/);
+  assert.deepEqual(back[9]?.[0], ['▸ ', S.cyan]);
 });
 
 test('the height of the window: the body of the screen matches the overview, the window 3–10 rows', () => {

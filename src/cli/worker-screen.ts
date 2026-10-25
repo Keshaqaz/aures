@@ -244,7 +244,10 @@ export function renderWorker(page: WorkerPage, { timeZone, width = WIDTH, cursor
   const lines: Segment[][] = [header, []];
   const items = workerItems(page);
   const selected = (item: WorkerItem) => items[cursor] === item;
-  const pointer = (item: WorkerItem): Segment => [selected(item) ? '▸ ' : '  ', S.cyan];
+  // With the cursor in the journal the ▸ stands at the heading of the journal: neither the
+  // accounts nor the row of actions point anywhere.
+  const chosen = (item: WorkerItem): boolean => !focus && selected(item);
+  const pointer = (item: WorkerItem): Segment => [chosen(item) ? '▸ ' : '  ', S.cyan];
 
   // The section «ВОРКЕР»: the platform and its state in one heading, the link, the accounts and
   // the actions in one row, all without their own headings.
@@ -268,8 +271,8 @@ export function renderWorker(page: WorkerPage, { timeZone, width = WIDTH, cursor
   ];
   const labelWidth = Math.max(...accounts.map(([item]) => len(itemLabel(item, page.platform, page.paused)))) + 3;
   for (const [item, value] of accounts) {
-    lines.push(spread([pointer(item), [itemLabel(item, page.platform, page.paused).padEnd(labelWidth), selected(item) ? S.cyan : ''], ...value],
-      [[t('sign in again', 'войти заново'), selected(item) ? S.cyan : S.dim]], width));
+    lines.push(spread([pointer(item), [itemLabel(item, page.platform, page.paused).padEnd(labelWidth), chosen(item) ? S.cyan : ''], ...value],
+      [[t('sign in again', 'войти заново'), chosen(item) ? S.cyan : S.dim]], width));
   }
 
   lines.push([]);
@@ -278,7 +281,7 @@ export function renderWorker(page: WorkerPage, { timeZone, width = WIDTH, cursor
   const actions: Segment[] = [];
   for (const [i, item] of items.slice(FIRST_ACTION).entries()) {
     if (i) actions.push([' ', '']);
-    actions.push(pointer(item), [itemLabel(item, page.platform, page.paused), selected(item) ? S.cyan : '']);
+    actions.push(pointer(item), [itemLabel(item, page.platform, page.paused), chosen(item) ? S.cyan : '']);
   }
   lines.push(actions, []);
 
@@ -306,7 +309,8 @@ export function renderWorker(page: WorkerPage, { timeZone, width = WIDTH, cursor
   const shown = Math.min(offset, Math.max(0, total - viewport));
   const range = (focus || shown > 0) && total ?
     ` · ${shown + 1}–${Math.min(shown + viewport, total)} ${t('of', 'из')} ${total}` : '';
-  lines.push(spread([[`${t('JOURNAL', 'ЖУРНАЛ')}${range}`, S.bold]], poll, width), [['─'.repeat(width), S.dim]]);
+  const mark: Segment[] = focus ? [['▸ ', S.cyan]] : [];
+  lines.push(spread([...mark, [`${t('JOURNAL', 'ЖУРНАЛ')}${range}`, S.bold]], poll, width), [['─'.repeat(width), S.dim]]);
 
   const window: Segment[][] = [];
   if (page.failed) window.push([[`  ${page.failed}`, S.yellow]]);

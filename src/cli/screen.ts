@@ -39,8 +39,8 @@ import { t, language, setLanguage } from './language.ts';
 const SPINNER = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏';
 const hint = (): string => t('↑↓ select · Enter apply · Tab worker · l language · r refresh · q quit',
   '↑↓ выбор · Enter применить · Tab воркер · l язык · r обновить · q выход');
-const workerHint = (): string => t('↑↓ select · Enter run · Tab resets · l language · r refresh · q quit',
-  '↑↓ выбор · Enter выполнить · Tab сбросы · l язык · r обновить · q выход');
+const workerHint = (): string => t('↑↓←→ select · Enter run · Tab resets · l language · r refresh · q quit',
+  '↑↓←→ выбор · Enter выполнить · Tab сбросы · l язык · r обновить · q выход');
 // What the keys do while the cursor stands in the journal of the screen «Воркер».
 const scrollHint = (): string => t('↑↓ scroll · PgUp PgDn page · Home newest · Esc actions · q quit',
   '↑↓ листать · PgUp PgDn страница · Home свежие · Esc к действиям · q выход');
