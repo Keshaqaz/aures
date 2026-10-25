@@ -234,8 +234,8 @@ test('the screen in English: l switches to Russian and back, keeping the choice 
 
 // The screen «Воркер» (issues 11, 15): Tab from the resets and back, the platform and its
 // accounts, the actions in one row and the live journal in a window that scrolls.
-const WORKER_HINT = '↑↓←→ выбор · Enter выполнить · Tab сбросы · l язык · r обновить · q выход';
-const SCROLL_HINT = '↑↓ листать · PgUp PgDn страница · Home свежие · Esc к действиям · q выход';
+const WORKER_HINT = '↑↓←→ выбор · Enter действие · Tab сбросы · l язык · r обновить · q выход';
+const SCROLL_HINT = '↑↓ листать · PgUp PgDn страница · Home свежие · Esc действия · q выход';
 const REPAIR_CAPTION = 'Заново залить текущую версию воркера и вернуть расписание на этой площадке. Сбросы, правила, вход в ChatGPT ' +
   'и журнал не трогаются. Поможет, если воркер перестал запускаться или его файлы меняли вручную';
 const HOUR = 3600_000, MINUTE = 60_000, DAY = 24 * HOUR;
@@ -297,7 +297,7 @@ test('the screen «Воркер» on Google: the platform, its accounts and the 
   assert.match(text(), /\n {2}Проверить сейчас ▸ Починить/);
   assert.doesNotMatch(text(), /ЖУРНАЛ/, 'the caption stands where the journal is');
   assert.equal(caption(screen.frame()), REPAIR_CAPTION);
-  assert.ok(screen.frame().slice(0, -1).every(line => [...line].length <= 72), 'the caption wraps to the width');
+  assert.ok(screen.frame().every(line => [...line].length <= 72), 'the caption wraps to the width');
   assert.ok(screen.frame().length >= withJournal, 'the area is not less tall than the journal');
 
   await press('left');
@@ -317,6 +317,22 @@ test('the screen «Воркер» in English', async () => {
   assert.match(text(), /\n▸ Check now {3}Repair {3}Pause {3}Switch to Google Apps Script\n/);
   assert.match(text(), /\nJOURNAL {3,}polled 12:00:\d\d · answered in 0\.0 s\n─+\n {2}12:00 {2}trial · nothing to apply {3,}0\.0 s\n/);
   assert.equal(screen.frame().at(-1), '↑↓←→ select · Enter run · Tab resets · l language · r refresh · q quit');
+});
+
+test('the hints of the screen «Воркер» fit the width in both languages, in the journal and out', async () => {
+  const { screen, press } = await opened();
+  await press('tab');
+  const hintFits = () => { const hint = screen.frame().at(-1) ?? ''; assert.ok([...hint].length <= 72, hint); };
+  hintFits(); // outside the journal
+  await press('down');
+  hintFits(); // in the journal
+  setLanguage('en');
+  try {
+    await press('escape');
+    hintFits();
+    await press('down');
+    hintFits();
+  } finally { setLanguage('ru'); }
 });
 
 test('the height of the screen «Воркер» follows the overview: the window 3–10 rows', async () => {
