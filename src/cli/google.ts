@@ -107,31 +107,46 @@ export interface DeployWorkerOptions {
   deployment: { scriptId: string; deploymentId?: string | null } | null;
   // Told the project as soon as it exists, so that an interrupted deploy does not make another.
   onProject?: (scriptId: string) => unknown;
+  // Setup's stage tells the switch of the Apps Script API: off with what to press, on once it is.
+  apiSwitch?: { off(text: string): void; on(): void };
 }
 
 // Puts this version of the worker into the user's script project with a fresh doPost secret:
 // create the project when there is none, replace its files, freeze them as a version and point
 // the deployment at it. An existing deployment is updated, so its web app keeps its URL. The
 // secret reaches the Keychain once the deployment serves it.
-export async function deployWorker({ api, secretKeychain, io, open, sleep, workerSource, deployment, onProject }: DeployWorkerOptions):
+export async function deployWorker({ api, secretKeychain, io, open, sleep, workerSource, deployment, onProject, apiSwitch }: DeployWorkerOptions):
   Promise<WorkerDeployment> {
-  let waiting = false;
+  let waiting = false, on = false;
   // The first call to the Apps Script API fails until the user turns it on; there is no API for that.
   const enabled = async <T>(call: () => Promise<T>): Promise<T> => {
     for (;;) {
-      try { return await call(); } catch (error) {
+      try {
+        const result = await call();
+        if (waiting && apiSwitch && !on) {
+          on = true;
+          io.wait(null);
+          apiSwitch.on();
+        }
+        return result;
+      } catch (error) {
         if (!(error instanceof GoogleFailure && error.reason === 'api_disabled')) throw error;
       }
       if (!waiting) {
         waiting = true;
         // Told at once (issue 30): without the switch the step cannot pass, so the user
-        // must know what to press before the wait can grow long.
-        io.print(t(`Turn on the Apps Script API: on ${USER_SETTINGS} open the line «Google Apps Script API» and click its switch. ` +
-          'aures goes on by itself.',
-        `Включите API скрипта Google Apps: на ${USER_SETTINGS} откройте строку «API скрипта приложений Google Apps» и нажмите переключатель. ` +
-          'aures продолжит сам.'));
+        // must know what to press before the wait can grow long. Setup tells it in its stage.
+        if (apiSwitch) apiSwitch.off(t(`Turn on the Apps Script API: ${USER_SETTINGS}, the line «Google Apps Script API» → its switch`,
+          `Включите API скрипта: ${USER_SETTINGS}, строка «API скрипта приложений Google Apps» → переключатель`));
+        else {
+          io.print(t(`Turn on the Apps Script API: on ${USER_SETTINGS} open the line «Google Apps Script API» and click its switch. ` +
+            'aures goes on by itself.',
+          `Включите API скрипта Google Apps: на ${USER_SETTINGS} откройте строку «API скрипта приложений Google Apps» и нажмите переключатель. ` +
+            'aures продолжит сам.'));
+        }
         await open(USER_SETTINGS);
-        io.wait(t('Waiting for the Apps Script API to be on…', 'Ждём, когда API скрипта Google Apps включится…'));
+        io.wait(apiSwitch ? t('waiting, aures goes on by itself', 'ждём, aures продолжит сам') :
+          t('Waiting for the Apps Script API to be on…', 'Ждём, когда API скрипта Google Apps включится…'));
       }
       await sleep(API_POLL_MS);
     }

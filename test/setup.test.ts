@@ -13,6 +13,8 @@ import { cliWorld, terminal, WORKER_SOURCE } from './support/cli-world.ts';
 import type { CliFakeWorld, RunOptions } from './support/cli-world.ts';
 
 const HOUR = 3600_000, DAY = 24 * HOUR;
+// What setup ends with when the worker is not paused: it runs on its own.
+const HOURLY = 'Воркер работает по расписанию раз в час, Mac можно выключать.';
 
 async function installWorld(options?: Parameters<typeof cliWorld>[0]) {
   const { world, keychain, run } = await cliWorld(options);
@@ -40,21 +42,34 @@ test('setup goes from nothing to a working worker in a private repository', asyn
   assert.deepEqual(state.observed?.resets.map(r => r.id).sort(), ['reset-a', 'reset-b']);
 
   assert.equal(keychain.entries.size, 1);
-  // The codes of both device logins live in their stage lines (issue 30); the addresses wait
-  // for a slow user, so none of them is printed here.
-  assert.match(io.output(), /\[2\/5\] Вход в GitHub: код GHFK-\d+ \(скопирован\) ✓ octo-fake/);
-  assert.match(io.output(), /\[4\/5\] Вход в ChatGPT: код FAKE-\d+ \(скопирован\) ✓/);
-  assert.doesNotMatch(io.output(), /Если браузер не открылся/);
-  assert.match(io.output(), /Перед истечением \(в последние 8 часов\) — включено/);
-  assert.match(io.output(), /Когда кончится недельный лимит — выключено/);
-  assert.deepEqual(io.lines.filter(line => /^\[\d\/5\]/.test(line)), [
-    '[1/5] Площадка: 1. GitHub Actions',
-    '[2/5] Вход в GitHub: код GHFK-1001 (скопирован) ✓ octo-fake',
-    '[3/5] Репозиторий воркера… ✓',
-    '[4/5] Вход в ChatGPT: код FAKE-1000 (скопирован) ✓',
-    '[5/5] Воркер в GitHub… ✓',
+  // Each stage says what it does and why, its steps ✓ and what the user does → under it
+  // (issue 30); the addresses wait for a slow user, so none of them is printed here.
+  assert.deepEqual(io.lines.slice(io.lines.indexOf('[1/5] Площадка: GitHub Actions')), [
+    '[1/5] Площадка: GitHub Actions',
+    '[2/5] Вход в GitHub',
+    '      чтобы создать приватный репозиторий воркера в вашем аккаунте',
+    '      → код GHFK-1001 (скопирован): подтвердите его в открывшемся браузере',
+    '      ✓ octo-fake',
+    '[3/5] Репозиторий воркера',
+    '      приватный репозиторий: в нём код воркера, расписание и его зашифрованное состояние',
+    '      ✓ octo-fake/codex-auto-resets-worker создан',
+    '[4/5] Вход в ChatGPT',
+    '      у воркера своя сессия ChatGPT: через неё он видит и применяет сбросы',
+    '      → код FAKE-1000 (скопирован): подтвердите его в открывшемся браузере',
+    '      ✓ fake@example.invalid',
+    '[5/5] Первый запуск',
+    '      правила, расписание раз в час и пробный запуск, который ничего не тратит',
+    '      Когда применять сбросы:',
+    '        1. Перед истечением (в последние 8 часов) — включено',
+    '        2. Когда кончится недельный лимит — выключено',
+    '      Enter — готово, 1 или 2 — переключить: ',
+    '      ✓ правила сохранены',
+    '      ✓ файлы воркера и расписание раз в час',
+    '      ✓ пробный запуск прошёл',
+    '',
+    'Готово. Сбросов: 2. Воркер работает по расписанию раз в час, Mac можно выключать.',
   ], io.output());
-  assert.equal(io.lines.at(-1), 'Готово. Сбросов: 2.');
+  assert.doesNotMatch(io.output(), /Если браузер не открылся/);
   assert.deepEqual(world.violations, []);
   assert.deepEqual(world.github.violations, []);
 });
@@ -72,7 +87,7 @@ test('end to end: the worker setup committed runs on plain node and ticks on the
   // The before-expiry rule setup wrote reached the worker: the trial run names the reset due
   // in 3 hours and leaves it to a regular run; the verdict is in the run's log, the last
   // line of setup is short (issue 30).
-  assert.equal(io.lines.at(-1), 'Готово. Сбросов: 3.');
+  assert.equal(io.lines.at(-1), `Готово. Сбросов: 3. ${HOURLY}`);
   const summary: Summary = JSON.parse(world.github.text(repo, FILES.summary));
   assert.equal(summary.lastApplied, null);
   assert.deepEqual(summary.rules, { beforeExpiry: true, weeklyAutoApply: false });
@@ -87,7 +102,7 @@ test('the trial run of setup names the reset the rules would apply and spends no
   world.chatgpt.credits.push(credit('RateLimitResetCredit_0eb466b3212c819193799a1741f067f8', world.now + 2 * HOUR));
   const { code, io } = await run();
   assert.equal(code, 0, io.output());
-  assert.equal(io.lines.at(-1), 'Готово. Сбросов: 3.');
+  assert.equal(io.lines.at(-1), `Готово. Сбросов: 3. ${HOURLY}`);
   assert.deepEqual(world.consumeCalls(), []);
 });
 
@@ -127,7 +142,7 @@ test('a repeated setup finds the repository and keeps the state, rules and cron 
   // The worker's is the first session; the second is this Mac's, for the weekly rule.
   assert.equal(state.session.refreshToken, world.auth.sessions[0]?.refresh);
   assert.equal(repo.runs.length, 2);
-  assert.equal(io.lines.at(-1), 'Готово. Сбросов: 2.');
+  assert.equal(io.lines.at(-1), `Готово. Сбросов: 2. ${HOURLY}`);
   assert.equal(keychain.entries.size, 1);
 });
 
@@ -189,7 +204,7 @@ test('a state left without its key is replaced through a new ChatGPT login', asy
   repo.secrets.delete(STATE_KEY_SECRET);
   const { code, io } = await run({ answers: [] });
   assert.equal(code, 0);
-  assert.match(io.output(), /\[4\/5\] Вход в ChatGPT: код FAKE-\d+ \(скопирован\) ✓/);
+  assert.match(io.output(), /\[4\/5\] Вход в ChatGPT\n.*\n {6}→ код FAKE-\d+ \(скопирован\): подтвердите его в открывшемся браузере\n {6}✓ /);
   assert.ok(openState(world.github.text(repo, FILES.state), world.github.secret(repo, STATE_KEY_SECRET)));
 });
 
@@ -221,7 +236,7 @@ test('a trial run that cannot open the state tells to delete it and run setup ag
   repo.files.delete(FILES.state);
   const again = await run({ answers: [] });
   assert.equal(again.code, 0);
-  assert.equal(again.io.lines.at(-1), 'Готово. Сбросов: 2.');
+  assert.equal(again.io.lines.at(-1), `Готово. Сбросов: 2. ${HOURLY}`);
 });
 
 test('a trial run still queued after 10 minutes is left for the user to check', async () => {
@@ -235,7 +250,8 @@ test('a trial run still queued after 10 minutes is left for the user to check', 
   assert.equal(io.waits.at(-1), null, 'the live line is gone before the message');
 });
 
-const STARTING = 'Запускаем воркер на GitHub…', QUEUED = 'GitHub поставил воркер в очередь, ждём (до 10 минут)…';
+// The waits of the trial run stand under the indent of its stage.
+const STARTING = '      Запускаем воркер на GitHub…', QUEUED = '      GitHub поставил воркер в очередь, ждём (до 10 минут)…';
 
 test('setup waits out the GitHub queue and says on the live line what it waits for', async () => {
   const { world, run } = await installWorld();
@@ -256,7 +272,7 @@ test('polls GitHub drops or fails while the run is queued do not end setup', asy
   assert.equal(code, 0, io.output());
   // The run GitHub named is polled from the first poll on, so the failures meet it at once.
   assert.deepEqual(io.waits.filter(text => text !== null).slice(-3),
-    [STARTING, 'GitHub не отвечает, продолжаем ждать…', QUEUED]);
+    [STARTING, '      GitHub не отвечает, продолжаем ждать…', QUEUED]);
   assert.equal(io.waits.at(-1), null);
   assert.equal(world.github.repo()?.runs.length, 1, 'the worker is dispatched once');
   assert.match(io.lines.at(-1) ?? '', /^Готово\./);
@@ -346,14 +362,14 @@ test('a successful setup opens the screen when the terminal asks for it; a failu
   assert.equal(code, 0, io.output());
   // The hand-over is setup's last step: by then the done line and its own telling are said.
   assert.deepEqual(seenAtHandOver, ['Открываю aures…']);
-  assert.equal(io.lines.at(-2), 'Готово. Сбросов: 2.');
+  assert.equal(io.lines.at(-2), `Готово. Сбросов: 2. ${HOURLY}`);
   assert.equal(io.lines.at(-1), 'Открываю aures…');
 
   // Outside a terminal nothing is handed over: the done line is the last one.
   const plain = await installWorld();
   const done = await plain.run({ answers: ['1', ''] });
   assert.equal(done.code, 0, done.io.output());
-  assert.equal(done.io.lines.at(-1), 'Готово. Сбросов: 2.');
+  assert.equal(done.io.lines.at(-1), `Готово. Сбросов: 2. ${HOURLY}`);
 
   // A failed setup never opens it, whatever the terminal.
   const failing = await installWorld();

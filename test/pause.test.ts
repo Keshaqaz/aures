@@ -176,7 +176,8 @@ test('setup on Google on pause does not bring the schedule back, and the trial s
 
   const { code, io } = await run(setup, { answers: [] });
   assert.equal(code, 0, io.output());
-  assert.ok(io.lines.includes('Воркер остаётся на паузе: расписание остаётся снятым.'), io.output());
+  assert.ok(io.lines.includes('      ✓ воркер на паузе: расписание остаётся снятым'), io.output());
+  assert.equal(io.lines.at(-1), 'Готово. Сбросов: 2.', 'a paused worker is not told to run on its own');
   assert.equal(gas.triggers.length, 0, 'the repair does not bring the schedule back');
   assert.equal(journal().at(-1)?.kind, 'trial', 'the trial run happened');
   assert.equal((await mac.files.readInstall())?.paused, true);

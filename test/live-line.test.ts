@@ -35,6 +35,13 @@ test('in a terminal the wait line keeps its time, gives way to printed lines and
   assert.equal(output.writes.at(-1), 'конец\n');
 });
 
+test('the indent of a wait text, as a stage of setup gives it, stands before the spinner', () => {
+  const output = stream(true);
+  const { wait } = liveLine(output, { now: () => 0 });
+  wait('      ждём подтверждения');
+  assert.equal(output.writes.at(-1), '\r\x1b[2K      ⠋ ждём подтверждения 0:00');
+});
+
 test('a wait text wider than the terminal is cut to stay on one line', () => {
   const output = stream(true, 20);
   const { wait } = liveLine(output, { now: () => 0 });

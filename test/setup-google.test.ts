@@ -11,6 +11,8 @@ const HOUR = 3600_000, DAY = 24 * HOUR;
 const GOOGLE_LOGIN = 'https://accounts.google.com/';
 // The device-code page the ChatGPT sign-in opens (issue 23).
 const DEVICE = 'https://auth.openai.com/codex/device';
+// What setup ends with when the worker is not paused: it runs on its own.
+const EVERY_5 = 'Воркер работает по расписанию каждые 5 минут, Mac можно выключать.';
 
 async function googleWorld() {
   const cli = await cliWorld();
@@ -39,19 +41,36 @@ test('setup on Google goes from nothing to a scheduled worker and ends with a tr
   assert.match(io.output(), /1\. GitHub Actions — раз в час, GitHub пропускает многие запуски\./);
   assert.match(io.output(), /2\. Google Apps Script — каждые 5 минут\./);
   assert.doesNotMatch(io.output(), /рекоменд/i);
-  // The stages of issue 30: one line per stage, the platform first, ✓ with what the stage
-  // got; the one switch of the Apps Script API is told at once, inside the worker's stage.
-  assert.deepEqual(io.lines.filter(line => /^\[\d\/4\]/.test(line)), [
-    '[1/4] Площадка: 2. Google Apps Script',
-    '[2/4] Вход в Google… ✓ owner@example.invalid',
-    '[3/4] Воркер в Google… ✓',
-    '[4/4] Вход в ChatGPT: код FAKE-1000 (скопирован) ✓',
-  ], io.output());
-  assert.match(io.output(), /Включите API скрипта Google Apps: .*«API скрипта приложений Google Apps» и нажмите переключатель\. aures продолжит сам\./);
-  // Short (issue 30): from the menu to «Готово» — the menu, the stages and the API switch.
-  const done = io.lines.findIndex(line => line.startsWith('Готово.'));
-  assert.ok(done > 0 && done <= 8, io.output());
-  assert.equal(io.lines.at(-1), 'Готово. Сбросов: 3.');
+  // The stages of issue 30: each says what it does and why, its steps ✓ under it; the one
+  // switch of the Apps Script API is told at once, as what the user does in the worker's stage.
+  assert.deepEqual(io.lines, [
+    'Воркер — небольшая программа в облаке, которая сама применяет сбросы. Где ему работать:',
+    '  1. GitHub Actions — раз в час, GitHub пропускает многие запуски.',
+    '  2. Google Apps Script — каждые 5 минут.',
+    'Введите 1 или 2: ',
+    '',
+    '[1/5] Площадка: Google Apps Script',
+    '[2/5] Вход в Google',
+    '      чтобы создать проект воркера в вашем аккаунте Google',
+    '      ✓ owner@example.invalid',
+    '[3/5] Воркер в Google',
+    '      проект Apps Script в вашем аккаунте: в нём воркер и работает',
+    `      → Включите API скрипта: ${USER_SETTINGS}, строка «API скрипта приложений Google Apps» → переключатель`,
+    '      ✓ API скрипта включён',
+    '      ✓ проект aures-worker: код загружен',
+    '      ✓ скрипту разрешено работать',
+    '[4/5] Вход в ChatGPT',
+    '      у воркера своя сессия ChatGPT: через неё он видит и применяет сбросы',
+    '      → код FAKE-1000 (скопирован): подтвердите его в открывшемся браузере',
+    '      ✓ fake@example.invalid',
+    '[5/5] Первый запуск',
+    '      расписание каждые 5 минут и пробная проверка, которая ничего не тратит',
+    '      ✓ расписание включено',
+    '      ✓ пробная проверка прошла',
+    '',
+    `Готово. Сбросов: 3. ${EVERY_5}`,
+  ]);
+  assert.ok(io.waits.includes('      ждём, aures продолжит сам'), 'the wait for the API stands under the stage');
   // A quick user sees no buttons and no addresses (issue 30): those wait for a slow one.
   assert.doesNotMatch(io.output(),
     /Если браузер не открылся|«Продолжить»|Review permissions|Разрешите скрипту|два предупреждения|Правила: /);
@@ -100,13 +119,15 @@ test('a repeated setup on Google finds the project and keeps its state, rules an
   assert.equal(project.versions.length, versions, 'nothing is deployed again');
   assert.equal(world.google.requests.slice(requests).filter(r => !r.url.includes('/macros/')).length, 0, 'no Google sign-in or API call');
   assert.doesNotMatch(io.output(), /auth\.openai\.com|не проверял/);
-  // The worker's session is there: the stage is done at once (issue 30).
-  assert.match(io.output(), /\[4\/4\] Вход в ChatGPT… ✓ уже есть/);
+  // Everything is there: each stage is done at once (issue 30).
+  assert.match(io.output(), /\[3\/5\] Воркер в Google\n.*\n {6}✓ уже на месте\n/);
+  assert.match(io.output(), /\[4\/5\] Вход в ChatGPT\n.*\n {6}✓ уже есть\n/);
+  assert.match(io.output(), /\[5\/5\] Первый запуск\n.*\n {6}✓ расписание уже включено\n/);
   assert.equal(project.gas?.properties.get('rules'), before.get('rules'));
   const state = property(project, 'state') as { session: { refreshToken: string } };
   assert.equal(state.session.refreshToken, world.auth.sessions[0]?.refresh);
   assert.deepEqual(project.gas?.triggers, [{ handler: 'tick', minutes: 5 }]);
-  assert.equal(io.lines.at(-1), 'Готово. Сбросов: 2.');
+  assert.equal(io.lines.at(-1), `Готово. Сбросов: 2. ${EVERY_5}`);
   noViolations(cli);
 });
 
@@ -130,7 +151,7 @@ test('setup stopped while the script waits to be allowed goes on with the consen
   assert.equal(project.versions.length, 1, 'the deployed version is kept');
   assert.equal(world.google.opened.filter(href => href.startsWith(GOOGLE_LOGIN)).length, 1, 'one Google sign-in');
   assert.equal(await googleKeychain.read(), token);
-  assert.match(io.output(), /\[3\/4\] Воркер в Google… ✓/);
+  assert.match(io.output(), /\[3\/5\] Воркер в Google\n.*\n {6}✓ скрипту разрешено работать\n/);
   // A quick consent sees no buttons and no page address (issue 30); the reopen itself is the tell.
   assert.doesNotMatch(io.output(), /Разрешите скрипту|Review permissions/);
   assert.deepEqual(project.gas?.triggers, [{ handler: 'tick', minutes: 5 }]);
@@ -295,7 +316,7 @@ test('a worker that does not know the secret in the Keychain is deployed again u
   assert.notEqual(fresh, old);
   assert.equal(world.google.deployedSecret(), fresh);
   assert.equal(deployed(cli).versions.length, 2);
-  assert.match(io.output(), /\[4\/4\] Вход в ChatGPT… ✓ уже есть/);
+  assert.match(io.output(), /\[4\/5\] Вход в ChatGPT\n.*\n {6}✓ уже есть\n/);
   noViolations(cli);
 });
 
@@ -310,10 +331,10 @@ test('a web app still serving the previous version after a redeploy is waited ou
 
   const { code, io } = await cli.run({ answers: [] });
   assert.equal(code, 0, io.output());
-  assert.ok(io.waits.includes('Ждём, когда Google начнёт отдавать новую версию воркера…'), io.output());
+  assert.ok(io.waits.includes('      Ждём, когда Google начнёт отдавать новую версию воркера…'), io.output());
   assert.equal(world.google.deployedSecret(), await secretKeychain.read());
   assert.equal(deployed(cli).versions.length, 2);
-  assert.equal(io.lines.at(-1), 'Готово. Сбросов: 2.');
+  assert.equal(io.lines.at(-1), `Готово. Сбросов: 2. ${EVERY_5}`);
   noViolations(cli);
 });
 
@@ -328,7 +349,7 @@ test('a web app that keeps answering with the previous version past the minute i
   assert.equal(code, 1);
   assert.equal(io.lines.at(-1), 'Web app воркера всё ещё отвечает прежней версией: новая не вступила в силу за минуту. ' +
     'Повторите `aures setup` через несколько минут.');
-  assert.ok(io.waits.includes('Ждём, когда Google начнёт отдавать новую версию воркера…'), io.output());
+  assert.ok(io.waits.includes('      Ждём, когда Google начнёт отдавать новую версию воркера…'), io.output());
   assert.equal(io.waits.at(-1), null, 'the wait line is taken away');
   noViolations(cli);
 });
@@ -364,7 +385,7 @@ test('a slow user at the Google screens gets the buttons and the address as one 
   };
   const { code, io } = await cli.run();
   assert.equal(code, 0, io.output());
-  const hints = io.lines.filter(line => line.startsWith('Вход в Google: «Продолжить»'));
+  const hints = io.lines.filter(line => line.startsWith('      → Вход в Google: «Продолжить»'));
   assert.equal(hints.length, 1, io.output());
   assert.match(hints[0] ?? '', /Вход в Google: «Продолжить» → «Продолжить» → отметьте все галочки → «Продолжить»\. Если браузер не открылся: https:\/\/accounts\.google\.com\//);
   noViolations(cli);
@@ -376,7 +397,7 @@ test('a slow user at the consent gets its buttons as one line', async () => {
   cli.world.google.consentAfterMs = 45_000;
   const { code, io } = await cli.run();
   assert.equal(code, 0, io.output());
-  const hints = io.lines.filter(line => line.startsWith('Разрешите скрипту работать:'));
+  const hints = io.lines.filter(line => line.startsWith('      → Разрешите скрипту работать:'));
   assert.equal(hints.length, 1, io.output());
   assert.match(hints[0] ?? '', /«Review permissions» → тот же аккаунт → «Дополнительные настройки» → «Перейти на страницу "aures-worker" \(небезопасно\)» → обе галочки → «Продолжить»\. Страница: https:\/\/script\.google\.com\/macros\/s\/.*\/exec/);
   noViolations(cli);
@@ -393,8 +414,8 @@ test('a consent reopened for a missing box tells it to a slow user as one line',
   const { code, io } = await cli.run();
   assert.equal(code, 0, io.output());
   // The first wait names the page, the reopened one the boxes it wants (issue 29).
-  assert.equal(io.lines.filter(line => line.startsWith('Разрешите скрипту работать:')).length, 1, io.output());
-  const reopened = io.lines.filter(line => line.startsWith('Согласие дало не все доступы:'));
+  assert.equal(io.lines.filter(line => line.startsWith('      → Разрешите скрипту работать:')).length, 1, io.output());
+  const reopened = io.lines.filter(line => line.startsWith('      → Согласие дало не все доступы:'));
   assert.equal(reopened.length, 1, io.output());
   assert.match(reopened[0] ?? '', /Согласие дало не все доступы: отметьте обе галочки \(или «Выбрать все»\) → «Продолжить»\. Страница: https:\/\/script\.google\.com\/macros\/s\/.*\/exec/);
   noViolations(cli);
@@ -411,11 +432,12 @@ test('a slow user at the ChatGPT code gets the address as one line', async () =>
   const seen: { code: string | null, at: number } = { code: null, at: 0 };
   let approved = false;
   const io = {
-    print: (line: string) => { lines.push(line); },
-    wait: (text: string | null) => {
-      const code = /FAKE-\d+/.exec(String(text));
+    print: (line: string) => {
+      lines.push(line);
+      const code = /FAKE-\d+/.exec(line);
       if (code && seen.code === null) { seen.code = code[0]; seen.at = world.now; }
     },
+    wait: () => {},
     prompt: async (question: string) => { asked.push(question); lines.push(question); return '2'; },
   };
   const sleep = async (ms: number) => {
@@ -431,6 +453,9 @@ test('a slow user at the ChatGPT code gets the address as one line', async () =>
   assert.ok(approved, 'the user did enter the code in the end');
   const hints = lines.filter(line => line.includes('Если браузер не открылся: https://auth.openai.com/codex/device'));
   assert.equal(hints.length, 1, lines.join('\n'));
-  assert.match(lines.find(line => line.startsWith('[4/4]')) ?? '', /Вход в ChatGPT: код FAKE-\d+ \(скопирован\) ✓/);
+  // The code is there from the first moment, the address after the wait.
+  const stage = lines.indexOf('[4/5] Вход в ChatGPT');
+  assert.match(lines[stage + 2] ?? '', /^ {6}→ код FAKE-\d+ \(скопирован\): подтвердите его в открывшемся браузере$/);
+  assert.equal(lines.indexOf(hints[0] ?? ''), stage + 3);
   assert.deepEqual(asked, ['Введите 1 или 2: ']);
 });

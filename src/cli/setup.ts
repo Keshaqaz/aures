@@ -4,7 +4,7 @@ import { generateKey, sealState, readRules, BrokenState, STATE_FORMAT_VERSION } 
 import { workflowYaml } from '../worker/workflow.ts';
 import { CommandFailed, WORKER_REPOSITORY, WORKER_DESCRIPTION, workingLine, connectGitHub, workerRepository,
   chooseRules, readSummary, failedRunAdvice, runWorkerNow, command, trialVerdict, notReadYet, switchUnfinished,
-  Stages, stagedCode, doneLine } from './common.ts';
+  Stages, stagedCode, doneLine, chatgptWhy } from './common.ts';
 import { setupGoogle } from './setup-google.ts';
 import { runWhileEnabled } from './pause.ts';
 import type { Install, WatchFiles } from './watch-files.ts';
@@ -12,14 +12,6 @@ import { followWeeklyRule } from './mac-check.ts';
 import type { CommandOptions, GitHub, Io, Sleep } from './common.ts';
 import type { GitHubApi, Repository } from '../github/api.ts';
 import { t } from './language.ts';
-
-// The repository of the worker on GitHub, made if there is none. What setup's stage tells
-// about it is its ✓ (issue 30); the screen names the repository.
-async function ensureRepository(github: GitHub): Promise<Repository> {
-  const repo = await workerRepository(github);
-  if (repo) return repo;
-  return github.api.createRepository({ name: WORKER_REPOSITORY, description: WORKER_DESCRIPTION });
-}
 
 // Dispatches a trial run (CONTEXT.md, «Пробный запуск»), waits for it and reads what the
 // worker published and what the rules would do. A worker on pause runs it with the schedule
@@ -44,6 +36,8 @@ export async function trialRun({ api, repo, io, now, sleep, timeZone, paused }:
 async function choosePlatform(io: Io, files: WatchFiles): Promise<Install> {
   const install = await files.readInstall();
   if (install) return install;
+  io.print(t('The worker is a small program in the cloud that applies your resets by itself. Where should it run:',
+    'Воркер — небольшая программа в облаке, которая сама применяет сбросы. Где ему работать:'));
   io.print(t('  1. GitHub Actions — runs once an hour, but GitHub skips many runs.',
     '  1. GitHub Actions — раз в час, GitHub пропускает многие запуски.'));
   io.print(t('  2. Google Apps Script — runs every 5 minutes.',
@@ -52,6 +46,7 @@ async function choosePlatform(io: Io, files: WatchFiles): Promise<Install> {
     const answer = (await io.prompt(t('Type 1 or 2: ', 'Введите 1 или 2: '))).trim();
     const platform = answer === '1' ? 'github' : answer === '2' ? 'google' : null;
     if (platform) {
+      io.print('');
       const chosen: Install = { platform };
       await files.writeInstall(chosen);
       return chosen;
@@ -79,10 +74,10 @@ export async function setup(options: SetupOptions): Promise<number> {
     // setup would bring the new worker's schedule back before the old one is quenched.
     if (install.switching) throw new CommandFailed(switchUnfinished());
     const paused = install.paused === true;
-    // The stages of issue 30: one line each, the platform first — chosen just now or before.
+    // The stages of issue 30, the platform first — chosen just now or before.
     const google = install.platform === 'google';
-    const stages = new Stages(io, google ? 4 : 5);
-    stages.line(t('Platform', 'Площадка'), google ? '2. Google Apps Script' : '1. GitHub Actions');
+    const stages = new Stages(io, 5);
+    stages.line(t('Platform', 'Площадка'), google ? 'Google Apps Script' : 'GitHub Actions');
     try {
       return google ?
         await setupGoogle({ ...options, now, sleep, paused, stages }) :
@@ -103,18 +98,22 @@ export async function setup(options: SetupOptions): Promise<number> {
 // set up or removed. A worker on pause stays paused: the files go in, the schedule stays off.
 async function setupGitHub({ fetch, keychain, io, open, copy, workerSource, mac, now, sleep, random = Math.random, timeZone, paused, stages }:
   SetupOptions & { now: () => number; sleep: Sleep; paused: boolean; stages: Stages }): Promise<number> {
-  // Stage 2: the sign-in of the CLI to GitHub, its code in the stage line.
-  const signIn = stages.begin(t('Signing in to GitHub', 'Вход в GitHub'));
-  const gitHubCode = stagedCode(signIn, io, open, copy, now);
+  // Stage 2: the sign-in of the CLI to GitHub, its code what the user does.
+  const signIn = stages.begin(t('Signing in to GitHub', 'Вход в GitHub'),
+    t('to create the private worker repository in your account', 'чтобы создать приватный репозиторий воркера в вашем аккаунте'));
+  const gitHubCode = stagedCode(signIn, open, copy, now);
   let github: GitHub;
   try {
-    github = await connectGitHub({ fetch, keychain, io, open, copy, now, sleep, onCode: gitHubCode.onCode, quiet: true });
+    github = await connectGitHub({ fetch, keychain, io: signIn.io, open, copy, now, sleep, onCode: gitHubCode.onCode, quiet: true });
   } finally { gitHubCode.ended(); }
   signIn.done(github.login);
 
   // Stage 3: the repository of the worker, and what is already in it.
-  const repoStage = stages.begin(t('The worker repository', 'Репозиторий воркера'));
-  const repo = await ensureRepository(github);
+  const repoStage = stages.begin(t('The worker repository', 'Репозиторий воркера'),
+    t("a private repository with the worker's code, schedule and encrypted state",
+      'приватный репозиторий: в нём код воркера, расписание и его зашифрованное состояние'));
+  const existing = await workerRepository(github);
+  const repo = existing ?? await github.api.createRepository({ name: WORKER_REPOSITORY, description: WORKER_DESCRIPTION });
   const name = repo.full_name;
   const [state, rules, worker, workflow, hasKey] = await Promise.all([
     github.api.file(name, FILES.state), github.api.file(name, FILES.rules), github.api.file(name, FILES.worker), github.api.file(name, FILES.workflow),
@@ -124,14 +123,14 @@ async function setupGitHub({ fetch, keychain, io, open, copy, workerSource, mac,
     throw new CommandFailed(t('The worker is of an older version. Run `aures upgrade`, then `aures setup` again.',
       'Воркер старой версии. Запустите `aures upgrade`, затем снова `aures setup`.'));
   }
-  repoStage.done();
+  repoStage.done(existing ? t(`${name} already there`, `${name} уже есть`) : t(`${name} created`, `${name} создан`));
 
   // Stage 4: the worker's own session of ChatGPT.
-  const chatgpt = stages.begin(t('Signing in to ChatGPT', 'Вход в ChatGPT'));
+  const chatgpt = stages.begin(t('Signing in to ChatGPT', 'Вход в ChatGPT'), chatgptWhy());
   // The key cannot be read back, so a state without its key is useless and is replaced.
   if (state && hasKey) chatgpt.done(t('already there', 'уже есть'));
   else {
-    const code = stagedCode(chatgpt, io, open, copy, now);
+    const code = stagedCode(chatgpt, open, copy, now);
     let session;
     try { session = await deviceLogin({ fetch, now, sleep, onCode: code.onCode }); } finally { code.ended(); }
     const key = generateKey();
@@ -141,16 +140,22 @@ async function setupGitHub({ fetch, keychain, io, open, copy, workerSource, mac,
     await github.api.putSecret(name, STATE_KEY_SECRET, key);
     await github.api.putFile(name, FILES.state, sealState({ formatVersion: STATE_FORMAT_VERSION, session, pending: null, applied: [] }, key),
       { message: 'Save the worker session', sha: state?.sha });
-    await mac.files.rememberAccount('chatgpt', sessionEmail(session));
-    chatgpt.done();
+    const email = sessionEmail(session);
+    await mac.files.rememberAccount('chatgpt', email);
+    chatgpt.done(email ?? t('signed in', 'вход выполнен'));
   }
 
-  // Stage 5: the worker itself — the rules, the files, the schedule and the trial run.
-  const workerStage = stages.begin(t('The worker on GitHub', 'Воркер в GitHub'));
+  // Stage 5: the first run — the rules, the files, the schedule and the trial run.
+  const first = stages.begin(t('First run', 'Первый запуск'),
+    t('the rules, the schedule once an hour and a trial run that spends nothing',
+      'правила, расписание раз в час и пробный запуск, который ничего не тратит'));
   let weekly: boolean | null = null;
   if (!rules) {
-    const chosen = await chooseRules(io);
+    // The question needs the line: the spinner waits for after it.
+    first.io.wait(null);
+    const chosen = await chooseRules(first.io);
     await github.api.putFile(name, FILES.rules, `${JSON.stringify(chosen, null, 2)}\n`, { message: 'Set the general rules' });
+    first.step(t('the rules are saved', 'правила сохранены'));
     weekly = chosen.weeklyAutoApply;
   } else {
     // Rules that do not read leave this Mac as it is; the trial run names the fix.
@@ -162,9 +167,12 @@ async function setupGitHub({ fetch, keychain, io, open, copy, workerSource, mac,
     const minute = 1 + Math.floor(random() * 59);
     await github.api.putFile(name, FILES.workflow, workflowYaml({ minute }), { message: 'Run the worker every hour' });
   }
-  if (weekly !== null) await followWeeklyRule({ weekly, mac, fetch, io, open, copy, now, sleep });
-  const trial = await trialRun({ api: github.api, repo, io, now, sleep, timeZone, paused });
-  workerStage.done();
-  io.print(doneLine(trial.resets, trial.busy));
+  first.step(worker && workflow ? t("the worker's files are already in place", 'файлы воркера уже на месте') :
+    t("the worker's files and the hourly schedule", 'файлы воркера и расписание раз в час'));
+  if (weekly !== null) await followWeeklyRule({ weekly, mac, fetch, io: first.io, open, copy, now, sleep });
+  const trial = await trialRun({ api: github.api, repo, io: first.io, now, sleep, timeZone, paused });
+  first.done(t('the trial run passed', 'пробный запуск прошёл'));
+  io.print('');
+  io.print(doneLine(trial.resets, { busy: trial.busy, platform: 'github', paused }));
   return 0;
 }

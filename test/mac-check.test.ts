@@ -91,13 +91,13 @@ test('setup with the weekly rule chosen asks for the Mac code, and a repeated se
   const env = await cliWorld();
   const first = await env.run(setup, { answers: ['1', '2', ''] });
   assert.equal(first.code, 0, first.io.output());
-  assert.equal(first.io.lines.filter(line => line === macLogin()).length, 1);
+  assert.equal(first.io.lines.filter(line => line.trim() === macLogin()).length, 1);
   assert.equal(env.mac.launchctl.loaded.has(AGENT_LABEL), true);
   assert.ok(await env.mac.files.readSession());
 
   const again = await env.run(setup, { answers: [] });
   assert.equal(again.code, 0, again.io.output());
-  assert.ok(!again.io.lines.includes(macLogin()), again.io.output());
+  assert.ok(!again.io.lines.some(line => line.trim() === macLogin()), again.io.output());
   assert.ok(!again.io.output().includes('Внеочередная проверка'), 'a working agent is not announced again');
   assert.equal(env.mac.launchctl.loaded.has(AGENT_LABEL), true);
 });
@@ -111,7 +111,7 @@ test('setup after the Mac session is lost asks for the code again and clears ses
 
   const { code, io } = await run(setup, { answers: [] });
   assert.equal(code, 0, io.output());
-  assert.ok(io.lines.includes(macLogin()), io.output());
+  assert.ok(io.lines.some(line => line.trim() === macLogin()), io.output());
   const renewed = await session();
   assert.ok(renewed);
   assert.notEqual(renewed.refreshToken, old.refreshToken);

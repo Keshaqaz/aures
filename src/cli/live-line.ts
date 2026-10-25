@@ -24,9 +24,11 @@ export function liveLine(output: LiveOutput, { color = false, now = Date.now }: 
   const draw = () => {
     const time = elapsed(now() - since);
     // A wrapped line would not be redrawn in place, so the text gives way to the width.
-    const room = Math.max(1, (output.columns || 80) - time.length - 4), chars = [...text ?? ''];
-    const shown = chars.length > room ? `${chars.slice(0, room - 1).join('')}…` : text;
-    output.write(`\r\x1b[2K${paint(CYAN, SPINNER.charAt(tick++ % SPINNER.length))} ${shown} ${paint(DIM, time)}`);
+    // The indent of the text, as a stage of setup gives it, stands before the spinner.
+    const indent = /^ */.exec(text ?? '')?.[0] ?? '';
+    const room = Math.max(1, (output.columns || 80) - indent.length - time.length - 4), chars = [...(text ?? '').slice(indent.length)];
+    const shown = chars.length > room ? `${chars.slice(0, room - 1).join('')}…` : chars.join('');
+    output.write(`\r\x1b[2K${indent}${paint(CYAN, SPINNER.charAt(tick++ % SPINNER.length))} ${shown} ${paint(DIM, time)}`);
   };
   const clear = () => output.write('\r\x1b[2K');
   return {

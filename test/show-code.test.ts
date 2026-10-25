@@ -72,9 +72,10 @@ test('the GitHub device login of setup opens the page and copies the code', asyn
   assert.ok(env.world.google.opened.includes(DEVICE), 'the ChatGPT page is opened too');
   assert.ok(env.copied.some(text => /^GHFK-\d+$/.test(text)), 'the GitHub code is copied');
   assert.ok(env.copied.some(text => /^FAKE-\d+$/.test(text)), 'the ChatGPT code is copied too');
-  // The codes are in the stage lines of setup (issue 30); the addresses wait for a slow user.
-  assert.match(io.output(), /\[2\/5\] Вход в GitHub: код GHFK-\d+ \(скопирован\) ✓ octo-fake/);
-  assert.match(io.output(), /\[4\/5\] Вход в ChatGPT: код FAKE-\d+ \(скопирован\) ✓/);
+  // The codes are what the user does in the stages of setup (issue 30); the addresses wait
+  // for a slow user.
+  assert.match(io.output(), /\[2\/5\] Вход в GitHub\n.*\n {6}→ код GHFK-\d+ \(скопирован\): подтвердите его в открывшемся браузере\n {6}✓ octo-fake\n/);
+  assert.match(io.output(), /\[4\/5\] Вход в ChatGPT\n.*\n {6}→ код FAKE-\d+ \(скопирован\): подтвердите его в открывшемся браузере\n/);
   assert.doesNotMatch(io.output(), /Если браузер не открылся/);
 });
 

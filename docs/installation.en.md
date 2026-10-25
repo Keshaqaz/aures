@@ -23,14 +23,15 @@ Google is more precise and simpler; its stages follow.
 
 | Stage | What to do |
 | --- | --- |
-| `[1/4] Platform` | Type `2`. |
-| `[2/4] Signing in to Google` | Pick the account. On the «Google hasn't verified this app» page: «Advanced» → «Go to aures (unsafe)». Then «Continue» → «Select all» → «Continue». |
-| `[3/4] The worker on Google` | If asked: on the page that opens, click the «Google Apps Script API» switch. Then on the «aures-worker (Unverified)» page: «Review permissions» → the same account → «Advanced» → «Go to aures-worker (unsafe)» → «Select all» → «Continue». |
-| `[4/4] Signing in to ChatGPT` | The code is already on the clipboard: paste it on the page that opens and sign in to the account with the resets. |
+| `[1/5] Platform` | Type `2`. |
+| `[2/5] Signing in to Google` | Pick the account. On the «Google hasn't verified this app» page: «Advanced» → «Go to aures (unsafe)». Then «Continue» → «Select all» → «Continue». |
+| `[3/5] The worker on Google` | If asked: on the page that opens, click the «Google Apps Script API» switch. Then on the «aures-worker (Unverified)» page: «Review permissions» → the same account → «Advanced» → «Go to aures-worker (unsafe)» → «Select all» → «Continue». |
+| `[4/5] Signing in to ChatGPT` | The code is already on the clipboard: paste it on the page that opens and sign in to the account with the resets. |
+| `[5/5] First run` | Nothing: the schedule and a trial check. |
 
-It ends with `Done. Resets: N.`, and the main aures screen opens.
+Each stage has a line on why it is there, its steps get a `✓`, and what you need to do is a `→` line. It ends with `Done. Resets: N.`, and the main aures screen opens.
 
-<img src="assets/setup-en.png" alt="aures setup on Google Apps Script: the platform, four stages with ticks, Done and the screen opening">
+<img src="assets/setup-en.png" alt="aures setup on Google Apps Script: the platform, five stages with their reasons and ticks, Done and the screen opening">
 
 Both Google «unverified app» warnings are expected: the aures app and the worker script are yours, Google just has not reviewed them. If a stage waits longer than ~30 seconds, `setup` prints a hint with the buttons and a link in case the browser did not open. If `setup` is interrupted, just run it again — it picks up where it stopped.
 
@@ -41,8 +42,8 @@ Both Google «unverified app» warnings are expected: the aures app and the work
 | `[1/5] Platform` | Type `1`. |
 | `[2/5] Signing in to GitHub` | The code is already on the clipboard: paste it on the page that opens and allow access. |
 | `[3/5] The worker repository` | Nothing: a private `codex-auto-resets-worker` repository appears in your account. |
-| `[4/5] Signing in to ChatGPT` | As on Google. Then pick the rules (Enter keeps them). If you turn on «When the weekly limit runs out», `setup` asks for one more ChatGPT code — for this Mac (see [The Mac check](#the-mac-check)). |
-| `[5/5] The worker on GitHub` | Nothing: the schedule and a trial run. |
+| `[4/5] Signing in to ChatGPT` | As on Google. |
+| `[5/5] First run` | Pick the rules (Enter keeps them). If you turn on «When the weekly limit runs out», `setup` asks for one more ChatGPT code — for this Mac (see [The Mac check](#the-mac-check)). Then the schedule and a trial run. |
 
 ### From source
 

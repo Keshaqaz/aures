@@ -128,13 +128,21 @@ export function slowHint(io: Printer, line: string, { now }: { now: () => number
   return { stop: () => { stopped = true; } };
 }
 
-// The stages of setup (issue 30): one line each. While a stage runs its `[n/N] Name…` is the
-// live line — whatever the stage waits for takes the line for a while and gives it back —
-// and when the stage is done the same line is printed with ✓, and with what the stage got
-// when it names something. A note (the code of a device login) becomes part of the line at
-// once: it is the one thing the user must not miss.
+// The stages of setup (issue 30): each says what it does and why. A stage begins with its
+// `[n/N] Name` and one line of why under it; then its steps, each a `✓` line when done, and
+// what it needs of the user, a `→` line, all under the indent of the stage. While it works the
+// live line stands under the stage too. Whatever the stage prints from deeper down goes through
+// its io and keeps the indent.
+const INDENT = '      ';
+const BOLD = '\x1b[1m', DIM = '\x1b[2m', RESET = '\x1b[0m';
 export interface StageRun {
-  note(text: string): void;
+  // The io of the stage: its lines and its waits under the indent.
+  io: Io;
+  // A step that is done.
+  step(text: string): void;
+  // What the stage needs the user to do.
+  act(text: string): void;
+  // The end of the stage, with its last step when it names one.
   done(summary?: string): void;
 }
 export class Stages {
@@ -146,17 +154,22 @@ export class Stages {
     this.total = total;
   }
 
-  // A stage that runs.
-  begin(name: string): StageRun {
+  // A stage that runs: its heading, why it is there and, until its first wait, a spinner.
+  begin(name: string, why: string): StageRun {
     this.n++;
-    let note: string | null = null;
-    const live = () => `[${this.n}/${this.total}] ${name}${note === null ? '' : `: ${note}`}…`;
-    this.io.wait(live());
+    const { io } = this, paint = (code: string, text: string) => io.color ? `${code}${text}${RESET}` : text;
+    io.print(paint(BOLD, `[${this.n}/${this.total}] ${name}`));
+    io.print(paint(DIM, `${INDENT}${why}`));
+    const stage: Io = { ...io, print: line => io.print(`${INDENT}${line}`), prompt: question => io.prompt(`${INDENT}${question}`),
+      wait: text => io.wait(text === null ? null : `${INDENT}${text}`) };
+    stage.wait(t('working…', 'работаем…'));
     return {
-      note: text => { note = text; this.io.wait(live()); },
+      io: stage,
+      step: text => stage.print(`✓ ${text}`),
+      act: text => stage.print(`→ ${text}`),
       done: summary => {
-        this.io.wait(null);
-        this.io.print(`[${this.n}/${this.total}] ${name}${note === null ? '…' : `: ${note}`} ✓${summary ? ` ${summary}` : ''}`);
+        stage.wait(null);
+        if (summary) stage.print(`✓ ${summary}`);
       },
     };
   }
@@ -164,27 +177,34 @@ export class Stages {
   // A stage that needs no waiting, as the platform, chosen before the stages began.
   line(name: string, summary: string): void {
     this.n++;
-    this.io.print(`[${this.n}/${this.total}] ${name}: ${summary}`);
+    const heading = `[${this.n}/${this.total}] ${name}:`;
+    this.io.print(`${this.io.color ? `${BOLD}${heading}${RESET}` : heading} ${summary}`);
   }
 }
 
-// The code of a device login as a stage of setup shows it (issue 30): the code goes into the
-// stage line at once, and the page's address waits with the slow hint — printed only if the
-// user takes longer than a moment, for a browser that did not open. ended() is for when the
-// login is over, succeeded or not; neither failure of open nor of the clipboard ends it.
+// Why the worker signs in to ChatGPT, the same on both platforms.
+export const chatgptWhy = (): string => t('the worker gets its own ChatGPT session to see and apply your resets',
+  'у воркера своя сессия ChatGPT: через неё он видит и применяет сбросы');
+
+// The code of a device login as a stage of setup shows it (issue 30): the code at once as what
+// the user does, and the page's address waits with the slow hint — printed only if the user
+// takes longer than a moment, for a browser that did not open. ended() is for when the login
+// is over, succeeded or not; neither failure of open nor of the clipboard ends it.
 export interface StagedCode {
   onCode(code: DeviceCode): Promise<void>;
   ended(): void;
 }
-export function stagedCode(stage: StageRun, io: Printer, open: OpenUrl, copy: CopyText, now: () => number): StagedCode {
+export function stagedCode(stage: StageRun, open: OpenUrl, copy: CopyText, now: () => number): StagedCode {
   let hint: SlowHint | null = null;
   return {
     async onCode({ userCode, verificationUrl }) {
       let copied = false;
-      try { copied = await copy(userCode); } catch { /* the code is in the stage line anyway */ }
-      stage.note(t(`code ${userCode}${copied ? ' (copied)' : ''}`, `код ${userCode}${copied ? ' (скопирован)' : ''}`));
+      try { copied = await copy(userCode); } catch { /* the code is in the line anyway */ }
+      stage.act(t(`code ${userCode}${copied ? ' (copied)' : ''}: confirm it in the browser that opened`,
+        `код ${userCode}${copied ? ' (скопирован)' : ''}: подтвердите его в открывшемся браузере`));
+      stage.io.wait(t('waiting for the confirmation', 'ждём подтверждения'));
       hint?.stop();
-      hint = slowHint(io, t(`If the browser did not open: ${verificationUrl}`, `Если браузер не открылся: ${verificationUrl}`), { now });
+      hint = slowHint(stage.io, t(`→ If the browser did not open: ${verificationUrl}`, `→ Если браузер не открылся: ${verificationUrl}`), { now });
       try { await open(verificationUrl); } catch { /* the address comes with the hint */ }
     },
     ended() { hint?.stop(); hint = null; },
@@ -193,12 +213,18 @@ export function stagedCode(stage: StageRun, io: Printer, open: OpenUrl, copy: Co
 
 // What a successful setup ends with (issue 30): one line — the screen it opens next shows
 // the resets and the rules themselves. resets is null when the worker has not read them yet,
-// with busy telling that ChatGPT was the reason.
-export const doneLine = (resets: number | null, busy = false): string => resets !== null ?
-  t(`Done. Resets: ${resets}.`, `Готово. Сбросов: ${resets}.`) :
-  busy ? t('Done. ChatGPT is temporarily unavailable; the worker will read the resets on its next run.',
-    'Готово. ChatGPT временно недоступен; воркер прочитает сбросы при следующем запуске.') :
-  t('Done. The worker will read the resets on its next run.', 'Готово. Воркер прочитает сбросы при следующем запуске.');
+// with busy telling that ChatGPT was the reason. A worker that is not paused is told to run
+// on its platform's schedule without this Mac.
+export function doneLine(resets: number | null, { busy = false, platform, paused = false }: { busy?: boolean; platform: Platform; paused?: boolean }): string {
+  const told = resets !== null ? t(`Done. Resets: ${resets}.`, `Готово. Сбросов: ${resets}.`) :
+    busy ? t('Done. ChatGPT is temporarily unavailable; the worker will read the resets on its next run.',
+      'Готово. ChatGPT временно недоступен; воркер прочитает сбросы при следующем запуске.') :
+    t('Done. The worker will read the resets on its next run.', 'Готово. Воркер прочитает сбросы при следующем запуске.');
+  if (paused) return told;
+  return `${told} ${platform === 'google' ? t('The worker runs every 5 minutes on its own, your Mac can be off.',
+    'Воркер работает по расписанию каждые 5 минут, Mac можно выключать.') :
+    t('The worker runs once an hour on its own, your Mac can be off.', 'Воркер работает по расписанию раз в час, Mac можно выключать.')}`;
+}
 
 // The two general rules as the user reads them in rules, status and the screen. The
 // before-expiry window is the platform's (ADR-0007).
