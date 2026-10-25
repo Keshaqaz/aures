@@ -12,6 +12,10 @@ import { otherPlatform, platformName } from './switch.ts';
 import { shortTime, S, WIDTH } from './overview.ts';
 import type { Segment, Tone } from './overview.ts';
 import { t } from './language.ts';
+import { GoogleApi, GoogleFailure } from '../google/api.ts';
+import type { Fetch } from '../chatgpt/http.ts';
+import { KeychainUnavailable } from './keychain.ts';
+import type { Keychain } from './keychain.ts';
 
 // While the screen is open the worker is polled this often: Google answers in a second, GitHub
 // counts every listing against its API limit.
@@ -33,18 +37,37 @@ export interface WorkerPage {
   // The GitHub login; on Google, the email of the Google account if a sign-in gave it.
   account: string | null;
   accounts: Accounts;
+  // Whether Google still takes the sign-in of the CLI: false when it is gone (revoked or expired)
+  // or there is none; null on GitHub, or when the Keychain or Google did not answer.
+  googleSignIn: boolean | null;
   journal: Journal | null;
   polledAt: number;
   failed: string | null;
 }
 
-export async function readWorkerPage({ worker, mac, now }: { worker: Worker; mac: Mac; now: () => number }): Promise<WorkerPage> {
+export interface WorkerPageOptions { worker: Worker; mac: Mac; now: () => number; fetch: Fetch; googleKeychain: Pick<Keychain, 'read'> }
+export async function readWorkerPage({ worker, mac, now, fetch, googleKeychain }: WorkerPageOptions): Promise<WorkerPage> {
   const install = await mac.files.readInstall();
   const accounts = install?.accounts ?? {};
   const page = { platform: worker.platform, paused: install?.paused === true, switching: install?.switching ?? null, accounts,
     link: worker.platform === 'github' ? worker.repo.html_url : projectUrl(worker.scriptId),
     account: worker.platform === 'github' ? worker.repo.owner.login : accounts.google ?? null };
-  return { ...page, journal: await readJournal(worker, { now }), polledAt: now(), failed: null };
+  const [journal, googleSignIn] = await Promise.all([readJournal(worker, { now }),
+    worker.platform === 'google' ? checkGoogleSignIn({ fetch, now, keychain: googleKeychain }) : null]);
+  return { ...page, googleSignIn, journal, polledAt: now(), failed: null };
+}
+
+// The worker on Google runs without the sign-in of the CLI, so nothing in its journal tells of
+// it: the poll asks Google for an access token with the refresh token from the Keychain.
+async function checkGoogleSignIn({ fetch, now, keychain }: { fetch: Fetch; now: () => number; keychain: Pick<Keychain, 'read'> }):
+  Promise<boolean | null> {
+  let token: string | null;
+  try { token = await keychain.read(); } catch (error) { if (error instanceof KeychainUnavailable) return null; throw error; }
+  if (!token) return false;
+  try {
+    await new GoogleApi({ fetch, now, refreshToken: token }).accessToken();
+    return true;
+  } catch (error) { return error instanceof GoogleFailure && error.reason === 'invalid_grant' ? false : null; }
 }
 
 // The cursor stands on the accounts, then on the actions; it opens on the first action. A worker
@@ -152,11 +175,12 @@ export function renderWorker(page: WorkerPage, { timeZone, width = WIDTH, cursor
   heading(t('ACCOUNTS', 'АККАУНТЫ'));
   const entries = page.journal?.entries ?? [];
   const unknown = t('account unknown', 'аккаунт неизвестен');
-  const lost = sessionLost(entries);
+  const signIn = (lost: boolean): Segment[] => [[' · ', S.dim],
+    lost ? [t('sign-in lost', 'вход потерян'), S.yellow] : [t('signed in', 'вход работает'), '']];
   const accounts: [WorkerItem, Segment[]][] = [
-    ['platformAccount', [[page.account ?? unknown, page.account ? '' : S.dim]]],
-    ['chatgpt', [[page.accounts.chatgpt ?? unknown, page.accounts.chatgpt ? '' : S.dim], [' · ', S.dim],
-      lost ? [t('sign-in lost', 'вход потерян'), S.yellow] : [t('signed in', 'вход работает'), '']]],
+    ['platformAccount', [[page.account ?? unknown, page.account ? '' : S.dim],
+      ...page.googleSignIn === null ? [] : signIn(!page.googleSignIn)]],
+    ['chatgpt', [[page.accounts.chatgpt ?? unknown, page.accounts.chatgpt ? '' : S.dim], ...signIn(sessionLost(entries))]],
   ];
   const labelWidth = Math.max(...accounts.map(([item]) => len(itemLabel(item, page.platform, page.paused)))) + 3;
   for (const [item, value] of accounts) {

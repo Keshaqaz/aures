@@ -116,7 +116,8 @@ export class Screen {
 
   // Reads the screen «Воркер» again. A poll that gets no answer keeps what the last one read and says why.
   async loadWorker(): Promise<void> {
-    try { this.page = await readWorkerPage(this); } catch (error) {
+    const { worker, mac, now, fetch, options: { googleKeychain } } = this;
+    try { this.page = await readWorkerPage({ worker, mac, now, fetch, googleKeychain }); } catch (error) {
       if (!this.page) throw error;
       this.page = { ...this.page, polledAt: this.now(), failed: explain(error) ?? t('unexpected error', 'неожиданная ошибка') };
     }

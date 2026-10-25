@@ -263,7 +263,7 @@ test('the screen «Воркер» on Google: the platform, its accounts and the 
   const { screen, press, text, project } = await openedOnGoogle();
   await screen.press({ name: 'tab', sequence: '\t' });
   assert.match(text(), new RegExp(`\nВОРКЕР\n─+\n● Google Apps Script · активен\n {2}https://script\\.google\\.com/home/projects/${project.scriptId}\n`));
-  assert.match(text(), /\nАККАУНТЫ\n─+\n {2}Google {4}owner@example\.invalid {3,}войти заново\n {2}ChatGPT {3}fake@example\.invalid · вход работает {3,}войти заново\n/);
+  assert.match(text(), /\nАККАУНТЫ\n─+\n {2}Google {4}owner@example\.invalid · вход работает {3,}войти заново\n {2}ChatGPT {3}fake@example\.invalid · вход работает {3,}войти заново\n/);
   assert.match(text(), /\nДЕЙСТВИЯ\n─+\n▸ Проверить сейчас\n {2}Починить\n/);
   // The journal is newest first under its live line: the trial run of setup, then its login.
   assert.match(text(), /\nЖУРНАЛ\n─+\n {2}опрошен 12:00:\d\d, ответил за 0,0 с\n {2}20 окт 12:00 {2}пробный · применять нечего · 0,0 с\n {2}20 окт 12:00 {2}вход · применять нечего · 0,0 с/);
@@ -550,7 +550,7 @@ test('a Google grant without the email scope is no broken grant: setup goes on a
   await env.run(async options => { screen = await openScreen(options); return 0; });
   assert.ok(screen);
   await screen.press({ name: 'tab' });
-  assert.match(screen.frame().join('\n'), /\n {2}Google {4}аккаунт неизвестен {3,}войти заново\n/);
+  assert.match(screen.frame().join('\n'), /\n {2}Google {4}аккаунт неизвестен · вход работает {3,}войти заново\n/);
   assert.deepEqual(env.world.google.violations, []);
 });
 
@@ -565,6 +565,19 @@ test('«Войти заново» for Google signs the CLI in anew, keeps the em
   assert.equal((await mac.files.readInstall())?.accounts?.google, 'other@example.invalid');
   assert.notEqual(await googleKeychain.read(), before);
   assert.equal(world.google.refreshTokens.has(before), false);
+});
+
+test('a Google sign-in that Google no longer takes reads as lost, «войти заново» brings it back', async () => {
+  const { world, googleKeychain, press, text } = await openedOnGoogle();
+  const before = await googleKeychain.read();
+  assert.ok(before);
+  // Revoked in the Google account, or expired: the worker runs on, only the CLI's grant is gone.
+  world.google.refreshTokens.delete(before);
+  await press('tab', 'r');
+  assert.match(text(), /\n {2}Google {4}owner@example\.invalid · вход потерян {3,}войти заново\n/);
+  assert.match(text(), /\n {2}ChatGPT {3}fake@example\.invalid · вход работает/);
+  await press('up', 'up', 'return');
+  assert.match(text(), /\n▸ Google {4}owner@example\.invalid · вход работает {3,}войти заново\n/);
 });
 
 test('«Войти заново» for GitHub takes only the account of the worker repository', async () => {
