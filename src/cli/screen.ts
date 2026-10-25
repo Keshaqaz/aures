@@ -457,10 +457,13 @@ export class Screen {
       return t(`Signed in to GitHub as ${login}.`, `Вы вошли в GitHub как ${login}.`);
     }
     const before = await readSecret(googleKeychain);
+    const was = (await this.mac.files.readInstall())?.accounts?.google;
     await connectGoogle({ fetch, keychain: googleKeychain, io, open, now, files: this.mac.files, fresh: true });
-    // The grant before it is no longer used: it is ended, as uninstall ends the last one.
-    if (before) await revokeGoogle(fetch, before).catch(() => {});
     const email = (await this.mac.files.readInstall())?.accounts?.google;
+    // Google revokes the whole grant of the account, not one token: in the same account that
+    // would end the new sign-in too. Only the grant of another account is ended, as uninstall
+    // ends the last one; with an account unknown the one before is left alone.
+    if (before && was && email && was !== email) await revokeGoogle(fetch, before).catch(() => {});
     return email ? t(`Signed in to Google as ${email}.`, `Вы вошли в Google как ${email}.`) : t('Signed in to Google.', 'Вы вошли в Google.');
   }
 

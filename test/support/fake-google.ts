@@ -101,6 +101,8 @@ const challenge = (verifier: string): string => createHash('sha256').update(veri
 export function withGoogle(world: FakeWorld & { google?: FakeGoogle }): FakeGoogle {
   let serial = 0, enableAt: number | null = null;
   const codes = new Map<string, { scopes: string[]; redirect: string; challenge: string }>();
+  // refresh token → the account it was issued to: a revocation ends the grant of that account.
+  const accounts = new Map<string, string>();
   // user_content_key → the doPost reply waiting for its GET.
   const replies = new Map<string, string>();
   const isEnabled = () => {
@@ -190,6 +192,7 @@ export function withGoogle(world: FakeWorld & { google?: FakeGoogle }): FakeGoog
       }
       const refresh = `1//fake-refresh-${++serial}`;
       google.refreshTokens.set(refresh, grant.scopes);
+      accounts.set(refresh, google.email);
       const idToken = grant.scopes.includes('openid') ?
         { id_token: `${encode({ alg: 'RS256' })}.${encode({ iss: 'https://accounts.google.com', sub: '1', email: google.email })}.fake-signature` } : {};
       return json(200, { ...issue(grant.scopes), refresh_token: refresh, refresh_token_expires_in: 604799, ...idToken });
@@ -202,10 +205,16 @@ export function withGoogle(world: FakeWorld & { google?: FakeGoogle }): FakeGoog
     return json(400, { error: 'unsupported_grant_type' });
   }
 
-  // Revoking the refresh token ends the grant: the token and the access tokens it gave stop working.
+  // Revoking a refresh token ends the grant of its account: every refresh token of the account,
+  // the one revoked and those of later sign-ins alike, and the access tokens stop working.
   function revoke(form: Record<string, string>): Response {
     if (google.revokeFail !== null) return json(google.revokeFail, { error: 'backend_error' });
-    if (!google.refreshTokens.delete(form.token ?? '')) return json(400, { error: 'invalid_token', error_description: 'Token expired or revoked' });
+    const token = form.token ?? '';
+    if (!google.refreshTokens.has(token)) return json(400, { error: 'invalid_token', error_description: 'Token expired or revoked' });
+    const account = accounts.get(token);
+    for (const refresh of [...google.refreshTokens.keys()]) {
+      if (refresh === token || (account !== undefined && accounts.get(refresh) === account)) google.refreshTokens.delete(refresh);
+    }
     google.accessTokens.clear();
     return json(200, {});
   }

@@ -722,7 +722,7 @@ test('a Google grant without the email scope is no broken grant: setup goes on a
   assert.deepEqual(env.world.google.violations, []);
 });
 
-test('«Войти заново» for Google signs the CLI in anew, keeps the email and ends the grant before it', async () => {
+test('«Войти заново» for Google in another account signs the CLI in anew, keeps the email and ends the grant before it', async () => {
   const { world, googleKeychain, mac, screen, press, text } = await openedOnGoogle();
   const before = await googleKeychain.read();
   assert.ok(before && world.google.refreshTokens.has(before));
@@ -733,6 +733,21 @@ test('«Войти заново» for Google signs the CLI in anew, keeps the em
   assert.equal((await mac.files.readInstall())?.accounts?.google, 'other@example.invalid');
   assert.notEqual(await googleKeychain.read(), before);
   assert.equal(world.google.refreshTokens.has(before), false);
+});
+
+// Google ends the whole grant of the account on a revocation: revoking the token before a
+// sign-in in the same account would end the new one too.
+test('«Войти заново» for Google in the same account keeps the new sign-in working', async () => {
+  const { world, googleKeychain, screen, press, text } = await openedOnGoogle();
+  const before = await googleKeychain.read();
+  assert.ok(before);
+  await press('tab', 'up', 'up', 'return');
+  assert.equal(screen.busy, null);
+  assert.match(text(), /aures · Google: Вы вошли в Google как owner@example\.invalid\./);
+  const renewed = await googleKeychain.read();
+  assert.ok(renewed && renewed !== before && world.google.refreshTokens.has(renewed));
+  await press('r');
+  assert.match(text(), /\n▸ Google {4}owner@example\.invalid · вход работает {3,}войти заново\n/);
 });
 
 test('a Google sign-in that Google no longer takes reads as lost, «войти заново» brings it back', async () => {
