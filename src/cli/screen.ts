@@ -13,7 +13,7 @@ import { fit } from './fit.ts';
 import type { Segment } from './fit.ts';
 import { readOverview, renderOverview, overviewItems, sameItem, headerLine, paint, S, WIDTH } from './overview.ts';
 import type { Overview, Tone as OverviewTone } from './overview.ts';
-import { readWorkerPage, renderWorker, itemLabel, POLL_MS, workerItems, FIRST_ACTION } from './worker-screen.ts';
+import { readWorkerPage, renderWorker, itemLabel, POLL_MS, workerItems, FIRST_ACTION, journalHeight, journalWindow } from './worker-screen.ts';
 import type { WorkerPage, WorkerItem, Step } from './worker-screen.ts';
 import { trialRun } from './setup.ts';
 import { trialLine } from './setup-google.ts';
@@ -41,6 +41,9 @@ const hint = (): string => t('↑↓ select · Enter apply · Tab worker · l la
   '↑↓ выбор · Enter применить · Tab воркер · l язык · r обновить · q выход');
 const workerHint = (): string => t('↑↓ select · Enter run · Tab resets · l language · r refresh · q quit',
   '↑↓ выбор · Enter выполнить · Tab сбросы · l язык · r обновить · q выход');
+// What the keys do while the cursor stands in the journal of the screen «Воркер».
+const scrollHint = (): string => t('↑↓ scroll · PgUp PgDn page · Home newest · Esc actions · q quit',
+  '↑↓ листать · PgUp PgDn страница · Home свежие · Esc к действиям · q выход');
 type Tone = Exclude<OverviewTone, 'bad'>;
 const TONES: Record<Tone, string> = { ok: S.green, warn: S.yellow };
 const MARGIN = '  ';
@@ -88,6 +91,9 @@ export class Screen {
   view: View = 'resets';
   page: WorkerPage | null = null; // the screen «Воркер» as last read
   workerCursor = FIRST_ACTION;
+  actionCursor = FIRST_ACTION; // the action the row chose last, where ↓ from ChatGPT lands
+  journal = false; // the cursor stands in the journal, not on the items
+  journalOffset = 0; // how far the journal window is scrolled, in visual lines
   steps: Step[] = []; // what the CLI did on the screen «Воркер», for its journal
   polling: Promise<void> | null = null; // the poll under way
   poller: ReturnType<typeof setInterval> | null = null;
@@ -116,13 +122,49 @@ export class Screen {
 
   // Reads the screen «Воркер» again. A poll that gets no answer keeps what the last one read and says why.
   async loadWorker(): Promise<void> {
+    const before = this.journalLines().length;
     const { worker, mac, now, fetch, options: { googleKeychain } } = this;
     try { this.page = await readWorkerPage({ worker, mac, now, fetch, googleKeychain }); } catch (error) {
       if (!this.page) throw error;
       this.page = { ...this.page, polledAt: this.now(), failed: explain(error) ?? t('unexpected error', 'неожиданная ошибка') };
     }
     // The actions change with the state the page read.
-    this.workerCursor = Math.min(this.workerCursor, workerItems(this.page).length - 1);
+    const last = workerItems(this.page).length - 1;
+    this.workerCursor = Math.min(this.workerCursor, last);
+    this.actionCursor = Math.min(this.actionCursor, last);
+    this.syncJournal(before);
+  }
+
+  // The height of the journal window: the body of the screen «Воркер» as tall as the body of the
+  // overview, with the window 3–10 rows.
+  windowRows(): number {
+    const body = this.model ? renderOverview(this.model, { now: this.now, timeZone: this.timeZone }).length : null;
+    return journalHeight(body);
+  }
+
+  // The visual lines the journal window can scroll over at the moment. A poll that got no answer
+  // pins its reason over the first of them, so the journal has one row fewer.
+  journalLines(page: WorkerPage | null = this.page): Segment[][] {
+    if (!page) return [];
+    return journalWindow(page, this.steps, { timeZone: this.timeZone, now: this.now,
+      viewport: this.windowRows() - (page.failed ? 1 : 0) }).lines;
+  }
+
+  // New lines come on top of the journal as it is polled; a window the user has scrolled stays
+  // on its lines: the offset moves by as many visual lines as came on top of it.
+  syncJournal(before: number): void {
+    const page = this.page;
+    if (!page || !this.journal || this.journalOffset <= 0) return;
+    const after = this.journalLines(page).length;
+    const viewport = this.windowRows() - (page.failed ? 1 : 0);
+    this.journalOffset = Math.min(this.journalOffset + Math.max(0, after - before), Math.max(0, after - viewport));
+  }
+
+  // What the CLI did on this screen, as a line of its journal.
+  step(text: string, tone: Step['tone'] = 'ok', at = this.now()): void {
+    const before = this.journalLines().length;
+    this.steps.push({ at, text, tone });
+    this.syncJournal(before);
   }
 
   // The worker is polled only while its screen is shown: Tab back to the resets and closing the screen stop it.
@@ -158,7 +200,8 @@ export class Screen {
     const options = { now: this.now, timeZone: this.timeZone, width, toggle: true };
     let lines;
     if (this.view === 'worker') {
-      lines = this.page ? renderWorker(this.page, { ...options, cursor: this.workerCursor, steps: this.steps, header: headerLine(options) }) :
+      lines = this.page ? renderWorker(this.page, { ...options, cursor: this.workerCursor, steps: this.steps, header: headerLine(options),
+        rows: this.windowRows(), offset: this.journalOffset, focus: this.journal }) :
         [headerLine(options)];
     } else if (this.model) lines = renderOverview(this.model, { ...options, cursor: this.cursor });
     else return [];
@@ -170,7 +213,7 @@ export class Screen {
     else if (this.confirm) {
       lines.push([[t(`Apply ${resetName(this.confirm)} now? A reset is single-use. `, `Применить ${resetName(this.confirm)} сейчас? Сброс одноразовый. `), S.bold],
         [t('y — yes, any other key — cancel', 'y — да, другая клавиша — отмена'), S.dim]]);
-    } else lines.push([[this.view === 'worker' ? workerHint() : hint(), S.dim]]);
+    } else lines.push([[this.view === 'worker' ? this.journal ? scrollHint() : workerHint() : hint(), S.dim]]);
     // Long lines fold under their text, not at the terminal's edge (issue 32).
     const folded = (part: Segment[][]) => fold ? part.flatMap(line => fit(line, width)) : part;
     const head = folded(lines.slice(0, body)), foot = folded(lines.slice(body));
@@ -181,6 +224,7 @@ export class Screen {
   // Where the cursor is among the items of the shown screen: on the first, on the last, or
   // between them. A frame taller than the terminal shows its top or its bottom there (issue 33).
   edge(): 'first' | 'last' | null {
+    if (this.view === 'worker' && this.journal) return 'last';
     const [at, count] = this.view === 'worker' ? [this.workerCursor, this.page ? workerItems(this.page).length : 0] :
       [this.cursor, this.model ? overviewItems(this.model).length : 0];
     return at === 0 ? 'first' : at === count - 1 ? 'last' : null;
@@ -208,7 +252,11 @@ export class Screen {
       return;
     }
     this.notes = [];
-    if (name === 'q' || name === 'escape') return this.close();
+    if (name === 'q' || name === 'escape') {
+      // In the journal Esc goes back to the actions; everywhere else it closes the screen.
+      if (name === 'escape' && this.view === 'worker' && this.journal) return this.pressOnWorker(name);
+      return this.close();
+    }
     if (name === 'r') return this.act(t('Refreshing…', 'Обновляем…'), async () => {});
     if (name === 'l') return this.switchLanguage();
     if (name === 'tab') return this.switchView();
@@ -224,6 +272,7 @@ export class Screen {
   }
 
   // Tab: the screen «Воркер», read anew and polled from now on, or back to the resets, read anew.
+  // The screen «Воркер» opens on its first action, its journal unscrolled.
   async switchView(): Promise<undefined> {
     if (this.view === 'worker') {
       this.stopPolling();
@@ -231,16 +280,46 @@ export class Screen {
       return this.act(t('Refreshing…', 'Обновляем…'), async () => {});
     }
     this.view = 'worker';
+    this.journal = false;
+    this.journalOffset = 0;
+    this.workerCursor = this.actionCursor = FIRST_ACTION;
     await this.act(t('Reading the worker journal…', 'Читаем журнал воркера…'), async () => {});
     if (this.view === 'worker') this.startPolling();
   }
 
+  // The keys of the screen «Воркер». The zones from top to bottom: the account of the platform,
+  // ChatGPT, the row of actions, the journal. ↑ and ↓ walk the zones, ← and → the row; in the
+  // journal they scroll the window and Enter does nothing. Nothing goes round.
   async pressOnWorker(name: string | undefined): Promise<undefined> {
-    const items = this.page ? workerItems(this.page) : [], count = items.length, item = items[this.workerCursor];
-    if (!count) return;
-    if (name === 'up' || name === 'k') this.workerCursor = (this.workerCursor + count - 1) % count;
-    else if (name === 'down' || name === 'j') this.workerCursor = (this.workerCursor + 1) % count;
-    else if ((name === 'return' || name === 'space') && item && this.page) return this.runItem(item);
+    const page = this.page;
+    if (!page) return;
+    const items = workerItems(page), count = items.length, item = items[this.workerCursor];
+    const total = this.journalLines(page).length;
+    const viewport = this.windowRows() - (page.failed ? 1 : 0);
+    const bottom = Math.max(0, total - viewport);
+    if (this.journal) {
+      if (name === 'up' || name === 'k') {
+        if (this.journalOffset > 0) this.journalOffset--;
+        else this.journal = false; // back on the row of actions, on the action chosen there
+      } else if (name === 'down' || name === 'j') this.journalOffset = Math.min(this.journalOffset + 1, bottom);
+      else if (name === 'pageup') this.journalOffset = Math.max(0, this.journalOffset - viewport);
+      else if (name === 'pagedown') this.journalOffset = Math.min(this.journalOffset + viewport, bottom);
+      else if (name === 'home') this.journalOffset = 0;
+      else if (name === 'escape') this.journal = false;
+      this.changed();
+      return;
+    }
+    if (name === 'up' || name === 'k') this.workerCursor = this.workerCursor > 1 ? 1 : 0;
+    else if (name === 'down' || name === 'j') {
+      if (this.workerCursor === 0) this.workerCursor = 1;
+      else if (this.workerCursor === 1) this.workerCursor = this.actionCursor;
+      else this.journal = true;
+    } else if ((name === 'left' || name === 'right') && this.workerCursor >= FIRST_ACTION) {
+      const actions = count - FIRST_ACTION;
+      this.workerCursor = FIRST_ACTION +
+        (this.workerCursor - FIRST_ACTION + (name === 'left' ? actions - 1 : 1)) % actions;
+    } else if ((name === 'return' || name === 'space') && item) return this.runItem(item);
+    if (this.workerCursor >= FIRST_ACTION) this.actionCursor = this.workerCursor;
     this.changed();
   }
 
@@ -272,7 +351,7 @@ export class Screen {
         tone = 'warn';
       }
       this.notes = [];
-      this.steps.push({ at: this.now(), text: `${label}: ${text}`, tone });
+      this.step(`${label}: ${text}`, tone);
     });
   }
 
@@ -290,7 +369,7 @@ export class Screen {
     const busy = stop ? t('Switching the platform…', 'Переключаем площадку…') : t('Finishing the switch…', 'Завершаем переключение…');
     this.stopSwitch = stop;
     const step = (text: string, tone: Step['tone'] = 'ok') => {
-      this.steps.push({ at: this.now(), text: `${label}: ${text.split('\n').join(' ')}`, tone });
+      this.step(`${label}: ${text.split('\n').join(' ')}`, tone);
       this.changed();
     };
     let moved = item === 'retry';
@@ -322,7 +401,7 @@ export class Screen {
         // The record names the platform the switch got to: the screen goes on with that worker.
         if (moved) {
           this.worker = await this.options.reopen();
-          this.workerCursor = FIRST_ACTION;
+          this.workerCursor = this.actionCursor = FIRST_ACTION;
         }
       });
     } finally { this.stopSwitch = null; }

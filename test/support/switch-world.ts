@@ -101,6 +101,6 @@ export async function switchWorld(platform: Platform, { answers = [''] }: { answ
     get onRequest(): OnRequest | null { return onRequest; },
     set onRequest(hook: OnRequest | null) { onRequest = hook; } };
 }
-// The keys from the first action of the screen «Воркер» down to «Переключиться на …»: Проверить
-// сейчас, Починить, Пауза, Переключиться.
-export const TO_SWITCH = ['tab', 'down', 'down', 'down'];
+// The keys from the first action of the screen «Воркер» to «Переключиться на …»: Проверить
+// сейчас, Починить, Пауза, Переключиться — the row is walked with ← and →.
+export const TO_SWITCH = ['tab', 'right', 'right', 'right'];
