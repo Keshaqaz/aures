@@ -162,6 +162,20 @@ test('a long line of the journal folds under itself and the window counts the vi
   assert.match(drawn[14] ?? '', /^ {9}\S/, 'the folded rest shows as its own line');
 });
 
+test('the bar stands on the right edge of every row of the window, whatever the length of the row', () => {
+  const steps: Step[] = [{ at: NOW - 60_000, text: 'Пауза: на паузе', tone: 'ok' }];
+  const entries = ['12:00', '12:05', '12:10', '12:15'].map((time, i) => run(time, i % 2 ? 'mac' : 'scheduled', 'idle'));
+  const failed = 'Google недоступен: ' + 'сервер ответил ошибкой и не вернул журнал воркера. '.repeat(2);
+  const p = page({ failed, journal: { entries, readAt: NOW, responseMs: 400 } });
+  const lines = plain(render(p, { steps, rows: 4 })).slice(13);
+  assert.equal(lines.length, 4);
+  for (const line of lines) {
+    assert.equal([...line].length, 72, line);
+    assert.match(line.slice(-3), /^ {2}[┃│]$/, line);
+  }
+  assert.match(lines[0] ?? '', /^ {2}Google недоступен: .*…/, 'the pinned reason keeps to its row');
+});
+
 test('a poll that got no answer: the heading says so and the reason stands pinned over the window', () => {
   const p = page({ failed: 'Google недоступен. Повторите: сделанное сохранится.',
     journal: { entries: [run('12:00', 'trial', 'idle', 300)], readAt: NOW, responseMs: 400 } });

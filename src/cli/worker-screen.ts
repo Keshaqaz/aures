@@ -312,8 +312,10 @@ export function renderWorker(page: WorkerPage, { timeZone, width = WIDTH, cursor
   const mark: Segment[] = focus ? [['▸ ', S.cyan]] : [];
   lines.push(spread([...mark, [`${t('JOURNAL', 'ЖУРНАЛ')}${range}`, S.bold]], poll, width), [['─'.repeat(width), S.dim]]);
 
+  // The pinned reason keeps to its one row: what does not fit ends in «…».
+  const room = bar ? width - 3 : width, reason = `  ${page.failed ?? ''}`;
   const window: Segment[][] = [];
-  if (page.failed) window.push([[`  ${page.failed}`, S.yellow]]);
+  if (page.failed) window.push([[len(reason) <= room ? reason : `${[...reason].slice(0, room - 1).join('')}…`, S.yellow]]);
   if (!total && page.journal) window.push([[t('  no runs yet', '  запусков ещё нет'), S.dim]]);
   window.push(...visual.slice(shown, shown + viewport));
   while (window.length < rows) window.push([]);
@@ -321,7 +323,9 @@ export function renderWorker(page: WorkerPage, { timeZone, width = WIDTH, cursor
     // The bar beside the window: what is in view of all there is, at least one row of it.
     const thumb = Math.max(1, Math.round(rows * viewport / total));
     const top = Math.min(rows - thumb, Math.round(shown / Math.max(1, total - viewport) * (rows - thumb)));
-    window.forEach((line, i) => line.push([`  ${i >= top && i < top + thumb ? '┃' : '│'}`, S.dim]));
+    // Each row is padded to the bar, the short ones and the blank ones too.
+    window.forEach((line, i) => line.push([' '.repeat(Math.max(0, room - line.reduce((n, [text]) => n + len(text), 0))), ''],
+      [`  ${i >= top && i < top + thumb ? '┃' : '│'}`, S.dim]));
   }
   lines.push(...window);
   return lines;

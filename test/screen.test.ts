@@ -448,7 +448,7 @@ test('«Проверить сейчас» on GitHub runs the trial run and the j
   assert.match(text(), /\nЖУРНАЛ {3,}опрошен [\d:]+ · ответил 0,0 с\n─+\n {2}12:\d\d {2}aures · Проверить сейчас: /);
   assert.match(text(), /применили бы сброс reset-c/);
   await press('down', 'down', 'down'); // into the journal, past the folded step
-  assert.match(text(), /\n {2}12:\d\d {2,}пробный · применили бы reset-c \(перед истечением\) {3,}0,0 с( {2}[┃│])?\n/);
+  assert.match(text(), /\n {2}12:\d\d {2,}пробный · применили бы reset-c \(перед истечением\) {3,}0,0 с( +[┃│])?\n/);
   assert.equal(screen.busy, null);
 });
 
@@ -462,7 +462,7 @@ test('«Проверить сейчас» on Google asks the worker for a trial 
     wouldApply: { creditId: 'reset-c', reason: 'before_expiry' } });
   assert.match(text(), /aures · Проверить сейчас: /);
   await press('down', 'down', 'down'); // into the journal, past the folded step
-  assert.match(text(), /\n {2}12:\d\d {2,}пробный · применили бы reset-c \(перед истечением\) {3,}0,0 с( {2}[┃│])?\n/);
+  assert.match(text(), /\n {2}12:\d\d {2,}пробный · применили бы reset-c \(перед истечением\) {3,}0,0 с( +[┃│])?\n/);
 });
 
 // What «Починить» must leave as it was on GitHub: the sealed state, the rules and the secrets.
@@ -570,7 +570,7 @@ test('«Пауза» and «Снять с паузы» on GitHub: the schedule go
   assert.equal((await mac.files.readInstall())?.paused, undefined);
   assert.match(text(), /\nВОРКЕР · GitHub Actions {3,}● активен\n/);
   assert.match(text(), /\n {2}Проверить сейчас {3}Починить ▸ Пауза {3}Переключиться/, 'the worker can be paused again');
-  assert.match(text(), /aures · Снять с паузы: Воркер снят с паузы: расписание( {2}[┃│])?\n +вернулось\./);
+  assert.match(text(), /aures · Снять с паузы: Воркер снят с паузы: расписание( +[┃│])?\n +вернулось\./);
 });
 
 test('«Пауза» and «Снять с паузы» on Google: the trigger goes off and comes back, the journal tells both steps', async () => {
@@ -591,7 +591,7 @@ test('«Пауза» and «Снять с паузы» on Google: the trigger goe
   assert.equal((await mac.files.readInstall())?.paused, undefined);
   assert.match(text(), /\nВОРКЕР · Google Apps Script {3,}● активен\n/);
   assert.match(text(), /\n {2}Проверить сейчас {3}Починить ▸ Пауза {3}Переключиться/);
-  assert.match(text(), /aures · Снять с паузы: Воркер снят с паузы: расписание( {2}[┃│])?\n +вернулось\./);
+  assert.match(text(), /aures · Снять с паузы: Воркер снят с паузы: расписание( +[┃│])?\n +вернулось\./);
 });
 
 test('«Починить» after «Пауза» from the screen puts the code in and leaves the schedule off', async () => {
@@ -658,7 +658,7 @@ test('the screen «Воркер» polls GitHub every 60 s while it is open and s
   t.mock.timers.tick(30_000);
   await screen.polling;
   assert.equal(runListings(world), opened_ + 1);
-  assert.match(text(), /\nЖУРНАЛ {3,}опрошен 13:00:\d\d · ответил 0,0 с\n─+\n {2}13:00 {2}по расписанию · применять нечего {3,}0,0 с( {2}[┃│])?\n/);
+  assert.match(text(), /\nЖУРНАЛ {3,}опрошен 13:00:\d\d · ответил 0,0 с\n─+\n {2}13:00 {2}по расписанию · применять нечего {3,}0,0 с( +[┃│])?\n/);
 
   await press('tab');
   const onResets = runListings(world);
@@ -702,7 +702,7 @@ test('the emails of the accounts come from the sign-ins; an install from before 
   await mac.files.writeInstall(before);
   await press('up', 'return');
   assert.equal(screen.busy, null);
-  assert.match(text(), /aures · ChatGPT: Вход обновлён, правила и история на( {2}[┃│])?\n +месте\./);
+  assert.match(text(), /aures · ChatGPT: Вход обновлён, правила и история на( +[┃│])?\n +месте\./);
   assert.match(text(), /\n▸ ChatGPT {3}fake@example\.invalid · вход работает/);
 });
 
@@ -760,7 +760,7 @@ test('«Войти заново» for GitHub takes only the account of the worke
   world.github.login = 'someone-else';
   await press('return');
   assert.equal(screen.busy, null);
-  assert.match(text(), /aures · GitHub: Это аккаунт GitHub someone-else, а воркер в( {2}[┃│])?\n +octo-fake\. Войдите в него\./);
+  assert.match(text(), /aures · GitHub: Это аккаунт GitHub someone-else, а воркер в( +[┃│])?\n +octo-fake\. Войдите в него\./);
   assert.equal(await keychain.read(), renewed, 'the sign-in before it is back');
 });
 
@@ -833,6 +833,17 @@ test('the frame after Esc: the switch is stopped, the worker active with its ses
   await press('left'); // off the switch, so that the journal is over its caption
   assert.match(text(), /aures · Переключение: отменено по Esc/);
   assert.match(text(), /aures · Переключение: Входим в Google…/);
+});
+
+test('in a narrow terminal the journal folds to its width and scrolls down to its oldest line', async () => {
+  const { screen, press } = await opened();
+  await press('tab');
+  for (let i = 1; i <= 6; i++) screen.steps.push({ at: screen.now() + i, text: `Шаг ${i}: длинный текст, который в узком терминале складывается в несколько строк.`, tone: 'ok' });
+  screen.frame(40);
+  await press('down', ...Array<string>(30).fill('pagedown'));
+  const window = screen.frame(40).join('\n');
+  assert.match(window, /пробный · применять нечего/, 'the oldest run in view');
+  assert.doesNotMatch(window, /Шаг 6/, 'the newest step scrolled away');
 });
 
 test('a paused worker is taken off pause first; ↑ from the first account goes nowhere', async () => {

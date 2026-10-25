@@ -94,6 +94,7 @@ export class Screen {
   actionCursor = FIRST_ACTION; // the action the row chose last, where ↓ from ChatGPT lands
   journal = false; // the cursor stands in the journal, not on the items
   journalOffset = 0; // how far the journal window is scrolled, in visual lines
+  width = WIDTH; // the width of the last frame: the journal folds and scrolls to it
   steps: Step[] = []; // what the CLI did on the screen «Воркер», for its journal
   polling: Promise<void> | null = null; // the poll under way
   poller: ReturnType<typeof setInterval> | null = null;
@@ -146,7 +147,7 @@ export class Screen {
   // pins its reason over the first of them, so the journal has one row fewer.
   journalLines(page: WorkerPage | null = this.page): Segment[][] {
     if (!page) return [];
-    return journalWindow(page, this.steps, { timeZone: this.timeZone, now: this.now,
+    return journalWindow(page, this.steps, { timeZone: this.timeZone, now: this.now, width: this.width,
       viewport: this.windowRows() - (page.failed ? 1 : 0) }).lines;
   }
 
@@ -197,6 +198,7 @@ export class Screen {
   // keys — what a frame taller than the terminal keeps in view (issue 33).
   footer = 0;
   frame(width = WIDTH, color = false, fold = color): string[] {
+    this.width = width;
     const options = { now: this.now, timeZone: this.timeZone, width, toggle: true };
     let lines;
     if (this.view === 'worker') {
