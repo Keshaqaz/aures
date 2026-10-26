@@ -65,9 +65,11 @@ The CLI speaks your system's language. To change it: `aures language en` / `aure
 aures
 ```
 
-<img src="assets/status-en.png" alt="The aures screen: resets on top, rules below, the worker line">
+<img src="assets/status-en.png" alt="The aures screen: resets on top, rules below, the worker section">
 
-Resets with their deadlines on top, the rules below, then a line about the worker.
+Resets with their deadlines on top, the rules below, then the worker: its state on the right, the next run and the last application.
+
+The line under the header fills up from the last scheduled run to the next one expected; on GitHub the end is only expected, so its last third is dashed. Full and with no new run, it stays full until the worker runs. On pause the whole line is dashed; while a switch is unfinished it is broken, and so is the worker's bracket.
 
 - `↑` `↓` — pick a line.
 - `Enter` on a reset — apply it now (`y` to confirm). A reset is single-use; applying it cannot be undone.
@@ -92,14 +94,18 @@ The rules cover every reset and take effect from the worker's next run. Change t
 
 `Tab` opens and closes it. It has:
 
-- **Worker** — the platform, its state and a link to the repository or project.
+- **Worker** — the platform, its state on the right and a link to the repository or project. On pause the bracket of the section is dashed.
 - **Accounts** — GitHub or Google, and ChatGPT; each with «sign in again».
 - **Actions:**
   - «Check now» — a trial run: the worker reads the resets and says what the rules would do, spending nothing.
   - «Repair» — redeploy the current worker and bring its schedule back. Resets, rules and the sign-in are kept.
   - «Pause» / «Unpause» — take the schedule off or bring it back. While paused the rules do not run and resets expire on their deadline; «Apply now» still works.
   - «Switch to …» — move the worker to the other platform (below).
-- **Journal** — the worker's recent runs: when, why, and how each ended. Updates itself while the screen is open.
+
+  Hold the cursor on an action for about half a second and its caption opens under the row; it stays open as you move along the row and closes when you leave it.
+- **Journal** — the worker's recent runs, newest first, in three columns: when, who started it (`schedule`, `Mac` or `you` — a check, a sign-in, «Apply now», an action on this screen) and what came of it. Quiet runs in a row fold into one line, such as «7 checks — all fine, nothing to apply». On the right of its heading — when it was read and how long the worker took to answer, or «no answer» in yellow. `↓` from the actions moves into the journal; its bracket is the scroll bar.
+
+While the screen reads the worker, a runner goes down the journal's bracket: a quick answer is a quick run, a slow one crawls, and a yellow stop means no answer. While an action runs, the bracket of its section fills up — for a sign-in, a switch or «Apply now», whose time is unknown, a runner goes round it instead — then lights green when it is done, or yellow if it needs a look. With `AURES_MOTION=off` or `NO_COLOR` set, nothing moves.
 
 ### Switching platforms
 

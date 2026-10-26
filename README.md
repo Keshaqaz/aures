@@ -75,10 +75,12 @@ Full guide, including installing from source: [docs/installation.en.md](docs/ins
 <img src="docs/assets/worker-en.png" alt="The «Worker» screen: the platform and its state, the accounts, the actions and the live journal">
 </div>
 
-- **Worker** — the platform, its state (active, on pause, switch unfinished) and a link to the repo or the script project.
+- **Worker** — the platform, its state on the right (active, on pause, switch unfinished) and a link to the repo or the script project.
 - **Accounts** — the GitHub or Google account and the worker's ChatGPT sign-in; Enter on either signs in again.
-- **Actions** — «Check now» (a trial run that applies nothing), «Repair» (deploys this version of the worker again and brings its schedule back), «Pause» / «Unpause» (the schedule off and back on; «Apply now» still works on pause) and «Switch to …» (moves the worker to the other platform, no reinstall).
-- **Journal** — the last runs of the worker, newest first: what started each run and how it ended. It is polled while the screen is open: every 30 seconds on Google, every minute on GitHub.
+- **Actions** — «Check now» (a trial run that applies nothing), «Repair» (deploys this version of the worker again and brings its schedule back), «Pause» / «Unpause» (the schedule off and back on; «Apply now» still works on pause) and «Switch to …» (moves the worker to the other platform, no reinstall). Hold the cursor on an action for a moment and its caption opens under the row: what it does and what it leaves alone.
+- **Journal** — the last runs of the worker, newest first, in three columns: when, who started it (the schedule, the Mac or you) and what came of it. It is polled while the screen is open: every 30 seconds on Google, every minute on GitHub.
+
+The line under the header fills up from the last scheduled run to the next one expected. Only what is going on moves: a runner down the journal's bracket while the worker is read, the bracket of a section filling up while an action runs (or a runner going round it when its time is unknown). `AURES_MOTION=off` keeps the screen still.
 
 Details in the [guide](docs/installation.en.md#the-worker-screen).
 
