@@ -43,20 +43,23 @@ test('status shows the resets, the rules, the last run and the last application'
   assert.equal(code, 0);
   assert.deepEqual(io.lines, [
     `aures ${pkg.version}${' '.repeat(54 - pkg.version.length)}20 окт 13:30`,
-    '',
-    'СБРОСЫ · 2',
     '─'.repeat(72),
-    `  reset-b   через 2 д 1 ч${' '.repeat(35)}22 окт 15:00`,
-    `  reset-a   через 4 д 22 ч${' '.repeat(34)}25 окт 12:00`,
     '',
-    'ПРАВИЛА',
-    '─'.repeat(72),
-    '  ☑ Перед истечением (в последние 8 часов)',
-    '  ☐ Когда кончится недельный лимит',
+    '╭─ СБРОСЫ · 2',
+    `│ reset-b   через 2 д 1 ч${' '.repeat(35)}22 окт 15:00`,
+    `│ reset-a   через 4 д 22 ч${' '.repeat(34)}25 окт 12:00`,
+    '╰─',
     '',
-    '● воркер работает · ждёт запуска по расписанию',
-    '  применён reset-due 20 окт 13:00 — перед истечением',
-    '  https://github.com/octo-fake/codex-auto-resets-worker',
+    '╭─ ПРАВИЛА',
+    '│ ☑ Перед истечением (в последние 8 часов)',
+    '│ ☐ Когда кончится недельный лимит',
+    '╰─',
+    '',
+    '╭─ ВОРКЕР · GitHub Actions' + ' '.repeat(37) + '● активен',
+    '│ ждёт запуска по расписанию',
+    '│ применён reset-due 20 окт 13:00 — перед истечением',
+    '│ https://github.com/octo-fake/codex-auto-resets-worker',
+    '╰─',
   ]);
   assert.deepEqual(world.github.violations, []);
 });
@@ -68,7 +71,7 @@ test('status marks a reset inside the before-expiry window', async () => {
   await world.github.schedule();
   world.advance(2 * HOUR);
   const { io } = await run(status);
-  assert.match(io.lines[4] ?? '', /^ {2}reset-soon {3}скоро применится +20 окт 22:00$/);
+  assert.match(io.lines[4] ?? '', /^│ reset-soon {3}скоро применится +20 окт 22:00$/);
 });
 
 test('status counts down to the next scheduled run by the usual gap between them', async () => {
@@ -78,15 +81,15 @@ test('status counts down to the next scheduled run by the usual gap between them
     await world.github.schedule();
   }
   world.advance(2 * HOUR);
-  assert.ok((await run(status)).io.lines.includes('● воркер работает · следующий запуск ожидается через 4 ч'));
+  assert.ok((await run(status)).io.lines.includes('│ следующий запуск ожидается через 4 ч'));
 
   // A dispatched run does not move the schedule.
   await world.github.dispatch();
   world.advance(30 * 60_000);
-  assert.ok((await run(status)).io.lines.includes('● воркер работает · следующий запуск ожидается через 3 ч'));
+  assert.ok((await run(status)).io.lines.includes('│ следующий запуск ожидается через 3 ч'));
 
   world.advance(4 * HOUR);
-  assert.ok((await run(status)).io.lines.includes('● воркер работает · следующий запуск ожидается в любой момент'));
+  assert.ok((await run(status)).io.lines.includes('│ следующий запуск ожидается в любой момент'));
 });
 
 test('status warns when the worker has not run for hours', async () => {
@@ -94,7 +97,7 @@ test('status warns when the worker has not run for hours', async () => {
   world.advance(9 * HOUR);
   const { code, io } = await run(status);
   assert.equal(code, 0);
-  assert.ok(io.lines.includes('● воркер молчит 9 ч'), io.output());
+  assert.ok(/● молчит 9 ч/.test(io.output()), io.output());
   assert.match(io.lines.at(-1) ?? '', /^! Воркер не запускался уже 9 ч\. Проверьте: https:\/\/github\.com\/.*\/actions$/);
   assert.match(io.output(), /СБРОСЫ · 2/, 'the last published resets are still shown');
 });
@@ -106,13 +109,14 @@ test('status warns about a silent cron even when dispatched runs keep the worker
   world.advance(7 * HOUR);
   await world.github.dispatch();
   world.advance(30 * 60_000);
-  assert.ok((await run(status)).io.lines.includes('● воркер работает · ждёт запуска по расписанию'));
+  assert.ok(/● активен\n│ ждёт запуска по расписанию/.test((await run(status)).io.output()));
 
   world.advance(HOUR);
   await world.github.dispatch();
   const { code, io } = await run(status);
   assert.equal(code, 0);
-  assert.ok(io.lines.includes('● нет запуска по расписанию 8 ч'), io.output());
+  assert.ok(/● нет запусков по расписанию/.test(io.output()), io.output());
+  assert.ok(/│ уже 8 ч/.test(io.output()), io.output());
   assert.match(io.lines.at(-1) ?? '', /^! GitHub не запускал воркер по расписанию уже 8 ч, а правило перед истечением зависит от этих запусков\. Проверьте: https:\/\/github\.com\/.*\/actions$/);
 });
 
@@ -122,7 +126,7 @@ test('status warns that a disabled workflow does not run the worker', async () =
   assert.equal(await world.github.schedule(), null);
   const { code, io } = await run(status);
   assert.equal(code, 0);
-  assert.ok(io.lines.includes('● воркер выключен в GitHub'), io.output());
+  assert.ok(/● выключен в GitHub/.test(io.output()), io.output());
   assert.match(io.lines.at(-1) ?? '', /^! Сбросы не применяются\. Включите воркер кнопкой Enable workflow: .*\/actions\/workflows\/codex-auto-resets\.yml$/);
 });
 
@@ -132,7 +136,8 @@ test('status explains a failed last run', async () => {
   world.advance(HOUR);
   await world.github.schedule();
   const { io } = await run(status);
-  assert.ok(io.lines.includes('● последний запуск с ошибкой · 20 окт 13:00'), io.output());
+  assert.ok(/● ошибка запуска/.test(io.output()), io.output());
+  assert.ok(/│ последний запуск с ошибкой · 20 окт 13:00/.test(io.output()), io.output());
   assert.equal(io.lines.at(-1), '! Воркер потерял вход в ChatGPT. Войдите заново: `aures login`. ' +
     `Подробности: ${repo.runs[0]?.html_url}`);
 });

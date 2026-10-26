@@ -47,6 +47,8 @@ const scrollHint = (): string => t('↑↓ scroll · PgUp PgDn page · Home newe
 type Tone = Exclude<OverviewTone, 'bad'>;
 const TONES: Record<Tone, string> = { ok: S.green, warn: S.yellow };
 const MARGIN = '  ';
+// How long the cursor has to stand on an action before its caption opens (issue 03).
+const CAPTION_MS = 400;
 // The same keys on the Russian layout.
 const RUSSIAN: Record<string, string> = { н: 'y', й: 'q', к: 'r', о: 'j', л: 'k', д: 'l' };
 
@@ -94,6 +96,10 @@ export class Screen {
   actionCursor = FIRST_ACTION; // the action the row chose last, where ↓ from ChatGPT lands
   journal = false; // the cursor stands in the journal, not on the items
   journalOffset = 0; // how far the journal window is scrolled, in visual lines
+  caption = false; // the caption of the action under the cursor is open and stays open over its neighbours
+  actionAt: number | null = null; // when the cursor came on the row of actions by a key
+  captionShown = false; // the last frame drew the caption open
+  selectedLine = -1; // the line of the last frame the cursor stands on (issue 33)
   width = WIDTH; // the width of the last frame: the journal folds and scrolls to it
   steps: Step[] = []; // what the CLI did on the screen «Воркер», for its journal
   polling: Promise<void> | null = null; // the poll under way
@@ -137,9 +143,9 @@ export class Screen {
   }
 
   // The height of the journal window: the body of the screen «Воркер» as tall as the body of the
-  // overview, with the window 3–10 rows.
+  // overview as the screen shows it (without the link only `status` has), with the window 3–10 rows.
   windowRows(): number {
-    const body = this.model ? renderOverview(this.model, { now: this.now, timeZone: this.timeZone }).length : null;
+    const body = this.model ? renderOverview(this.model, { now: this.now, timeZone: this.timeZone, toggle: true }).length : null;
     return journalHeight(body);
   }
 
@@ -148,7 +154,7 @@ export class Screen {
   journalLines(page: WorkerPage | null = this.page): Segment[][] {
     if (!page) return [];
     return journalWindow(page, this.steps, { timeZone: this.timeZone, now: this.now, width: this.width,
-      viewport: this.windowRows() - (page.failed ? 1 : 0) }).lines;
+      lastApplied: this.model?.lastApplied ?? null });
   }
 
   // New lines come on top of the journal as it is polled; a window the user has scrolled stays
@@ -192,6 +198,20 @@ export class Screen {
     return 'exit';
   }
 
+  // The caption of the action under the cursor (issue 03): it opens when the cursor has stood
+  // on the row for 400 ms and stays open while the cursor walks the row; off the row, on opening
+  // the screen and after an action it is closed until a key brings the cursor back.
+  captionOpen(): boolean {
+    if (this.view !== 'worker' || this.journal || this.workerCursor < FIRST_ACTION) return false;
+    return this.caption || this.actionAt !== null && this.now() - this.actionAt >= CAPTION_MS;
+  }
+
+  // The frame has to redraw while a caption waits to open, which the terminal's interval gives.
+  captionPending(): boolean {
+    return this.view === 'worker' && !this.journal && this.workerCursor >= FIRST_ACTION &&
+      this.actionAt !== null && !this.caption && !this.captionShown;
+  }
+
   // Lines of the frame, painted when color. fold folds the long ones under their text (issue
   // 32), as the terminal needs; the lines themselves, as tests read them, stay whole. footer is
   // how many of the last lines are the foot: what an action said, its spinner or question, the
@@ -200,13 +220,16 @@ export class Screen {
   frame(width = WIDTH, color = false, fold = color): string[] {
     this.width = width;
     const options = { now: this.now, timeZone: this.timeZone, width, toggle: true };
-    let lines;
+    const caption = this.captionOpen();
+    let lines: Segment[][];
     if (this.view === 'worker') {
       lines = this.page ? renderWorker(this.page, { ...options, cursor: this.workerCursor, steps: this.steps, header: headerLine(options),
-        rows: this.windowRows(), offset: this.journalOffset, focus: this.journal }) :
-        [headerLine(options)];
+        rows: this.windowRows(), offset: this.journalOffset, focus: this.journal, caption,
+        lastApplied: this.model?.lastApplied ?? null }) :
+        [headerLine(options), [['─'.repeat(width), S.dim]]];
     } else if (this.model) lines = renderOverview(this.model, { ...options, cursor: this.cursor });
     else return [];
+    this.captionShown = caption;
     const body = lines.length;
     lines.push([]);
     for (const note of this.notes) lines.push([[note.text, note.tone ? TONES[note.tone] : '']]);
@@ -216,9 +239,20 @@ export class Screen {
       lines.push([[t(`Apply ${resetName(this.confirm)} now? A reset is single-use. `, `Применить ${resetName(this.confirm)} сейчас? Сброс одноразовый. `), S.bold],
         [t('y — yes, any other key — cancel', 'y — да, другая клавиша — отмена'), S.dim]]);
     } else lines.push([[this.view === 'worker' ? this.journal ? scrollHint() : workerHint() : hint(), S.dim]]);
-    // Long lines fold under their text, not at the terminal's edge (issue 32).
-    const folded = (part: Segment[][]) => fold ? part.flatMap(line => fit(line, width)) : part;
-    const head = folded(lines.slice(0, body)), foot = folded(lines.slice(body));
+    // The line the cursor stands on: the heavy rail of the chosen row, or — the journal being
+    // focused — the cyan corner of its heading. A frame taller than the terminal keeps it in
+    // view (issue 33), so its place is found as the lines fold.
+    const picked = lines.slice(0, body).findIndex(([first]) =>
+      (first?.[0] === '┃ ' && first[1] === S.cyan) || (first?.[0] === '╭─ ' && first[1] === S.cyan));
+    this.selectedLine = -1;
+    const folded: Segment[][] = [];
+    const part = (from: number, to: number): Segment[][] => lines.slice(from, to).flatMap((line, i) => {
+      const rows = fold ? fit(line, width) : [line];
+      if (from + i === picked) this.selectedLine = folded.length;
+      folded.push(...rows);
+      return rows;
+    });
+    const head = part(0, body), foot = part(body, lines.length);
     this.footer = foot.length;
     return [...head, ...foot].map(line => paint(line, color));
   }
@@ -274,8 +308,11 @@ export class Screen {
   }
 
   // Tab: the screen «Воркер», read anew and polled from now on, or back to the resets, read anew.
-  // The screen «Воркер» opens on its first action, its journal unscrolled.
+  // The screen «Воркер» opens on its first action, its journal unscrolled; the caption of the
+  // action opens by dwell only, never with the screen itself.
   async switchView(): Promise<undefined> {
+    this.caption = false;
+    this.actionAt = null;
     if (this.view === 'worker') {
       this.stopPolling();
       this.view = 'resets';
@@ -299,6 +336,7 @@ export class Screen {
     const total = this.journalLines(page).length;
     const viewport = this.windowRows() - (page.failed ? 1 : 0);
     const bottom = Math.max(0, total - viewport);
+    const was = this.workerCursor, wasOnRow = !this.journal && this.workerCursor >= FIRST_ACTION;
     if (this.journal) {
       if (name === 'up' || name === 'k') {
         if (this.journalOffset > 0) this.journalOffset--;
@@ -308,10 +346,7 @@ export class Screen {
       else if (name === 'pagedown') this.journalOffset = Math.min(this.journalOffset + viewport, bottom);
       else if (name === 'home') this.journalOffset = 0;
       else if (name === 'escape') this.journal = false;
-      this.changed();
-      return;
-    }
-    if (name === 'up' || name === 'k') this.workerCursor = this.workerCursor > 1 ? 1 : 0;
+    } else if (name === 'up' || name === 'k') this.workerCursor = this.workerCursor > 1 ? 1 : 0;
     else if (name === 'down' || name === 'j') {
       if (this.workerCursor === 0) this.workerCursor = 1;
       else if (this.workerCursor === 1) this.workerCursor = this.actionCursor;
@@ -321,12 +356,23 @@ export class Screen {
       this.workerCursor = FIRST_ACTION +
         (this.workerCursor - FIRST_ACTION + (name === 'left' ? actions - 1 : 1)) % actions;
     } else if ((name === 'return' || name === 'space') && item) return this.runItem(item);
+    // The caption of an action opens after the cursor has stood on it 400 ms; a key that walks
+    // the row restarts the wait, an open one moves to the neighbour without it (issue 03).
+    const onRow = !this.journal && this.workerCursor >= FIRST_ACTION;
+    if (!onRow) { this.caption = false; this.actionAt = null; }
+    else if (this.workerCursor !== was || onRow !== wasOnRow) {
+      if (this.captionOpen()) this.caption = true;
+      else { this.caption = false; this.actionAt = this.now(); }
+    }
     if (this.workerCursor >= FIRST_ACTION) this.actionCursor = this.workerCursor;
     this.changed();
   }
 
   // An action of the screen «Воркер»: its result goes into the journal as a step of the CLI.
+  // While it runs, and after it, the caption stays closed until a key brings the cursor back.
   async runItem(item: WorkerItem): Promise<undefined> {
+    this.caption = false;
+    this.actionAt = null;
     if (item === 'switch' || item === 'retry') return this.runSwitch(item);
     const paused = this.page?.paused === true;
     const label = itemLabel(item, this.worker.platform, paused);
@@ -538,17 +584,18 @@ export async function openScreen(options: ScreenCommandOptions): Promise<Screen>
 }
 
 // What of a frame taller than the terminal is shown (issue 33): the header on top and the foot
-// below stay, and the part between them moves with the cursor, the selected line (▸) always in
+// below stay, and the part between them moves with the cursor, the selected line always in
 // view — with the cursor on the first item the top shows, on the last the bottom (the journal of
 // the screen «Воркер»). Where lines are hidden a mark says how many. lines are the painted
-// lines of the frame, each one row; offset is where the middle started the last time.
-export function viewport(lines: string[], { rows, foot, offset, edge }: { rows: number; foot: number; offset: number;
-  edge: 'first' | 'last' | null }): { lines: string[]; offset: number } {
+// lines of the frame, each one row; selected is the line the cursor stands on, by its index —
+// the Screen finds it as it draws; offset is where the middle started the last time.
+export function viewport(lines: string[], { rows, foot, offset, edge, selected }: { rows: number; foot: number; offset: number;
+  edge: 'first' | 'last' | null; selected: number }): { lines: string[]; offset: number } {
   const head = 1, middle = lines.slice(head, lines.length - foot), room = rows - head - foot - 2;
   if (lines.length <= rows || room < 1) return { lines, offset: 0 };
-  const selected = middle.findIndex(line => line.includes('▸'));
+  const pick = selected - head;
   let start = edge === 'first' ? 0 : edge === 'last' ? middle.length - room : offset;
-  if (selected >= 0) start = Math.min(Math.max(start, selected - room + 1), selected);
+  if (pick >= 0 && pick < middle.length) start = Math.min(Math.max(start, pick - room + 1), pick);
   start = Math.max(0, Math.min(start, middle.length - room));
   // Blank lines are no lines a user misses.
   const hidden = (part: string[]) => part.filter(line => line.trim()).length;
@@ -580,7 +627,8 @@ export function runScreen(screen: Screen, { input, output }: Terminal): Promise<
     const columns = output.columns || 80, width = Math.min(WIDTH, columns - 1 - MARGIN.length);
     const frame = screen.frame(width, true);
     // A frame taller than the terminal moves with the cursor; the blank line on top goes first.
-    const fitted = viewport(frame, { rows: (output.rows || 24) - 1, foot: screen.footer, offset, edge: screen.edge() });
+    const fitted = viewport(frame, { rows: (output.rows || 24) - 1, foot: screen.footer, offset, edge: screen.edge(),
+      selected: screen.selectedLine });
     offset = fitted.offset;
     const lines = ['', ...fitted.lines.map(line => MARGIN + line)];
     // A terminal too low even for that: the top gives way, the action, its codes and the keys are at the bottom.
@@ -603,12 +651,13 @@ export function runScreen(screen: Screen, { input, output }: Terminal): Promise<
     if (text) output.write(`\x1b[?2026h${text}\x1b[?2026l`);
   };
   const redraw = () => draw(true);
-  // The spinner turns while an action runs; the clock and the time left move every half minute.
+  // The spinner turns while an action runs; the clock and the time left move every half minute,
+  // and a caption waiting to open redraws the frame when its dwell passes (issue 03).
   let ticks = 0;
   const spin = setInterval(() => {
     ticks++;
     if (screen.busy) screen.tick++;
-    if (screen.busy || ticks % 300 === 0) draw();
+    if (screen.busy || screen.captionPending() || ticks % 300 === 0) draw();
   }, 100);
   emitKeypressEvents(input);
   const raw = input.isRaw;

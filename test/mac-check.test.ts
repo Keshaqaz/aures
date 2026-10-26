@@ -203,17 +203,17 @@ test('status tells whether the check from this Mac works, and what to do when it
     assert.equal(code, 0, io.output());
     return { rule: io.lines.find(l => l.includes('Когда кончится недельный лимит')), warnings: io.lines.filter(l => l.startsWith('! ')) };
   };
-  assert.deepEqual(await line(), { rule: '  ☐ Когда кончится недельный лимит', warnings: [] });
+  assert.deepEqual(await line(), { rule: '│ ☐ Когда кончится недельный лимит', warnings: [] });
 
   assert.equal((await run(rules, { answers: ['2', ''] })).code, 0);
-  assert.deepEqual(await line(), { rule: '  ☑ Когда кончится недельный лимит · проверка с Mac работает', warnings: [] });
+  assert.deepEqual(await line(), { rule: '│ ☑ Когда кончится недельный лимит · проверка с Mac работает', warnings: [] });
 
   await mac.files.writeState({ sessionLost: true });
-  assert.deepEqual(await line(), { rule: '  ☑ Когда кончится недельный лимит · проверка с Mac не работает',
+  assert.deepEqual(await line(), { rule: '│ ☑ Когда кончится недельный лимит · проверка с Mac не работает',
     warnings: ['! Вход этого Mac в ChatGPT потерян. Войдите заново: `aures setup`.'] });
 
   await mac.files.writeState({});
   await mac.agent.remove();
-  assert.deepEqual(await line(), { rule: '  ☑ Когда кончится недельный лимит · проверка с Mac не работает',
+  assert.deepEqual(await line(), { rule: '│ ☑ Когда кончится недельный лимит · проверка с Mac не работает',
     warnings: ['! Внеочередная проверка с этого Mac не запущена. Запустите `aures setup`.'] });
 });

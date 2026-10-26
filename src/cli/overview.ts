@@ -9,6 +9,7 @@ import { WORKFLOW_FILE, resetName, unfinished, switchUnfinished, ruleLabel, reas
   failedRunAdvice } from './common.ts';
 import type { Logged, Rule } from './common.ts';
 import { projectUrl, rulesOf } from './active-worker.ts';
+import { platformName } from './switch.ts';
 import type { Segment } from './fit.ts';
 import { brokenOnGoogle } from './google.ts';
 import type { Worker, GoogleWorker } from './active-worker.ts';
@@ -129,51 +130,54 @@ async function readGoogle({ worker, mac, now }: { worker: GoogleWorker; mac: Mac
   lastAttempt: summary?.lastAttempt ?? null };
 }
 
-type WorkerState = { tone: Tone; text: string; warning?: string };
+type WorkerState = { tone: Tone; label: string; detail?: string | null; warning?: string };
 // A worker on pause (CONTEXT.md): the schedule is off by the user's choice, the session and the
 // state stay. With no pause timer every reset left to itself burns at its deadline, so the
 // warning stands and «Применить сейчас» is the only thing that still applies (ADR-0007).
 const pausedWorker = (): WorkerState => ({
   tone: 'warn',
-  text: t('worker is paused', 'воркер на паузе'),
+  label: t('paused', 'на паузе'),
   warning: t('The worker is paused: resets are not applied and each burns at its activation deadline. «Apply now» still works.',
     'Воркер на паузе: сбросы не применяются и каждый сгорит в свой срок активации. «Применить сейчас» продолжает работать.'),
 });
 const nextRun = (nextRunAt: number | null, readAt: number): WorkerState => {
-  if (nextRunAt === null) return { tone: 'ok', text: t('worker works · waiting for a scheduled run', 'воркер работает · ждёт запуска по расписанию') };
-  if (nextRunAt <= readAt) return { tone: 'ok', text: t('worker works · next run due any moment', 'воркер работает · следующий запуск ожидается в любой момент') };
-  return { tone: 'ok', text: t(`worker works · next run expected ${timeLeft(nextRunAt - readAt)}`,
-    `воркер работает · следующий запуск ожидается ${timeLeft(nextRunAt - readAt)}`) };
+  const label = t('active', 'активен');
+  if (nextRunAt === null) return { tone: 'ok', label, detail: t('waiting for a scheduled run', 'ждёт запуска по расписанию') };
+  if (nextRunAt <= readAt) return { tone: 'ok', label, detail: t('next run due any moment', 'следующий запуск ожидается в любой момент') };
+  return { tone: 'ok', label, detail: t(`next run expected ${timeLeft(nextRunAt - readAt)}`,
+    `следующий запуск ожидается ${timeLeft(nextRunAt - readAt)}`) };
 };
 const executions = (scriptId: string): string => `${projectUrl(scriptId)}/executions`;
 
-// The worker in one line, and what the user should do about it.
+// The worker in its label beside the section heading, the detail under it and what the user
+// should do about it (issue 03).
 function workerState({ worker, readAt, paused, switching }: Overview, timeZone?: string): WorkerState {
-  if (switching) return { tone: 'bad', text: t('no active worker: the switch is not finished', 'активного воркера нет: переключение не завершено'),
-    warning: switchUnfinished() };
+  if (switching) return { tone: 'bad', label: t('no active worker', 'нет активного воркера'),
+    detail: t('the switch is not finished', 'переключение не завершено'), warning: switchUnfinished() };
   if (paused) return pausedWorker();
   if (worker.platform === 'google') return googleState(worker, readAt, timeZone);
   const { repo, workflowState, lastRun, lastScheduledAt, nextRunAt } = worker;
-  if (!workflowState) return { tone: 'warn', text: t('setup is not finished', 'установка не завершена'), warning: unfinished() };
+  if (!workflowState) return { tone: 'warn', label: t('setup unfinished', 'установка не завершена'), warning: unfinished() };
   if (workflowState !== 'active') {
-    return { tone: 'bad', text: t('worker is disabled in GitHub', 'воркер выключен в GitHub'),
+    return { tone: 'bad', label: t('disabled in GitHub', 'выключен в GitHub'),
       warning: t(`Resets are not applied. Turn the worker on with the Enable workflow button: ${enableUrl(repo)}`,
         `Сбросы не применяются. Включите воркер кнопкой Enable workflow: ${enableUrl(repo)}`) };
   }
-  if (!lastRun) return { tone: 'warn', text: t('worker has not run yet', 'воркер ещё не запускался') };
-  if (lastRun.status !== 'completed') return { tone: 'ok', text: t('worker works · running now', 'воркер работает · запуск идёт сейчас') };
+  if (!lastRun) return { tone: 'warn', label: t('not run yet', 'ещё не запускался') };
+  if (lastRun.status !== 'completed') return { tone: 'ok', label: t('active', 'активен'), detail: t('running now', 'запуск идёт сейчас') };
   const at = shortTime(runAt(lastRun), timeZone);
-  if (lastRun.conclusion !== 'success') return { tone: 'bad', text: t(`last run failed · ${at}`, `последний запуск с ошибкой · ${at}`) };
+  if (lastRun.conclusion !== 'success') return { tone: 'bad', label: t('last run failed', 'ошибка запуска'),
+    detail: t(`last run failed · ${at}`, `последний запуск с ошибкой · ${at}`) };
   const hours = Math.floor((readAt - runAt(lastRun)) / 3600_000);
   if (readAt - runAt(lastRun) > WINDOW_MS.github) {
-    return { tone: 'warn', text: t(`worker silent for ${hours}h`, `воркер молчит ${hours} ч`),
+    return { tone: 'warn', label: t(`silent ${hours}h`, `молчит ${hours} ч`),
       warning: t(`The worker has not run for ${hours}h. Check: ${repo.html_url}/actions`,
         `Воркер не запускался уже ${hours} ч. Проверьте: ${repo.html_url}/actions`) };
   }
   // Runs from this Mac or apply-now do not stand in for the cron: the before-expiry rule rests on it.
   if (lastScheduledAt !== null && readAt - lastScheduledAt > WINDOW_MS.github) {
     const silent = Math.floor((readAt - lastScheduledAt) / 3600_000);
-    return { tone: 'warn', text: t(`no scheduled run for ${silent}h`, `нет запуска по расписанию ${silent} ч`),
+    return { tone: 'warn', label: t('no scheduled run', 'нет запусков по расписанию'), detail: t(`none for ${silent}h`, `уже ${silent} ч`),
       warning: t(`GitHub has not run the worker on schedule for ${silent}h, and the before-expiry rule depends on it. Check: ${repo.html_url}/actions`,
         `GitHub не запускал воркер по расписанию уже ${silent} ч, а правило перед истечением зависит от этих запусков. Проверьте: ${repo.html_url}/actions`) };
   }
@@ -184,21 +188,22 @@ function workerState({ worker, readAt, paused, switching }: Overview, timeZone?:
 function googleState({ scriptId, schedule, journal }: Extract<WorkerView, { platform: 'google' }>, readAt: number, timeZone?: string):
   WorkerState {
   if (!schedule) {
-    return { tone: 'bad', text: t('worker has no schedule', 'у воркера нет расписания'),
+    return { tone: 'bad', label: t('no schedule', 'нет расписания'),
       warning: t('Resets are not applied. Repair the worker: «Repair» on the screen «Worker» (Tab in `aures`) puts the schedule back.',
         'Сбросы не применяются. Почините воркер: «Починить» на экране «Воркер» (Tab в `aures`) вернёт расписание.') };
   }
   const last = journal.at(-1);
-  if (!last) return { tone: 'warn', text: t('worker has not run yet', 'воркер ещё не запускался') };
+  if (!last) return { tone: 'warn', label: t('not run yet', 'ещё не запускался') };
   if (USER_MENDS.includes(last.outcome)) {
     const at = shortTime(Date.parse(last.at), timeZone);
-    return { tone: 'bad', text: t(`last run failed · ${at}`, `последний запуск с ошибкой · ${at}`) };
+    return { tone: 'bad', label: t('last run failed', 'ошибка запуска'),
+      detail: t(`last run failed · ${at}`, `последний запуск с ошибкой · ${at}`) };
   }
   const scheduled = journal.findLast(entry => entry.kind === 'scheduled');
   const scheduledAt = scheduled ? Date.parse(scheduled.at) : null;
   if (scheduledAt !== null && readAt - scheduledAt > WINDOW_MS.google) {
     const silent = Math.floor((readAt - scheduledAt) / 3600_000);
-    return { tone: 'warn', text: t(`no scheduled run for ${silent}h`, `нет запуска по расписанию ${silent} ч`),
+    return { tone: 'warn', label: t('no scheduled run', 'нет запусков по расписанию'), detail: t(`none for ${silent}h`, `уже ${silent} ч`),
       warning: t(`Google has not run the worker on schedule for ${silent}h, and the before-expiry rule depends on it. Check: ${executions(scriptId)}`,
         `Google не запускал воркер по расписанию уже ${silent} ч, а правило перед истечением зависит от этих запусков. Проверьте: ${executions(scriptId)}`) };
   }
@@ -254,20 +259,26 @@ export function headerLine({ now, timeZone, width = WIDTH, toggle = false }: Omi
 }
 
 // Lines of [text, style] segments. cursor is the index in overviewItems, or null without one;
-// toggle shows the languages in the header, for the screen.
+// toggle shows the languages in the header, for the screen — and takes the link of the worker
+// off it, for the screen «Воркер» has it.
 export interface RenderOptions { now: () => number; timeZone?: string; width?: number; cursor?: number | null; toggle?: boolean }
 export function renderOverview(model: Overview, { now, timeZone, width = WIDTH, cursor = null, toggle = false }: RenderOptions): Segment[][] {
   const lines: Segment[][] = [], items = overviewItems(model);
   const at = (item: Item) => cursor !== null && sameItem(item, items[cursor]);
-  const heading = (text: string) => lines.push([[text, S.bold]], [['─'.repeat(width), S.dim]]);
+  // The section language (issue 03): an open bracket around a section, its lines on a rail the
+  // cursor makes heavy, one blank line between the sections.
+  const rail = (selected = false): Segment => [selected ? '┃ ' : '│ ', selected ? S.cyan : S.dim];
+  const open = (name: Segment[], right: Segment[] = []): void => {
+    lines.push(right.length ? spread([['╭─ ', S.dim], ...name], right, width) : [['╭─ ', S.dim], ...name]);
+  };
 
-  lines.push(headerLine({ now, timeZone, width, toggle }), []);
-  const resetsTitle = t('RESETS', 'СБРОСЫ');
-  heading(model.resets?.length ? `${resetsTitle} · ${model.resets.length}` : resetsTitle);
-  if (!model.resets) lines.push([[t('  not read yet — the worker reads them on its next run', '  ещё не прочитаны — воркер прочитает их при следующем запуске'), S.dim]]);
-  else if (!model.resets.length) lines.push([[t('  no resets', '  сбросов нет'), S.dim]]);
-  const idWidth = Math.max(0, ...(model.resets ?? []).map(reset => len(resetName(reset.creditId))));
-  for (const reset of model.resets ?? []) {
+  lines.push(headerLine({ now, timeZone, width, toggle }), [['─'.repeat(width), S.dim]], []);
+  const resetsTitle = t('RESETS', 'СБРОСЫ'), resets = model.resets ?? [];
+  open([[resetsTitle, S.bold], ...(resets.length ? [[` · ${resets.length}`, S.dim]] as Segment[] : [])]);
+  if (!model.resets) lines.push([rail(), [t('not read yet — the worker reads them on its next run', 'ещё не прочитаны — воркер прочитает их при следующем запуске'), S.dim]]);
+  else if (!resets.length) lines.push([rail(), [t('no resets', 'сбросов нет'), S.dim]]);
+  const idWidth = Math.max(0, ...resets.map(reset => len(resetName(reset.creditId))));
+  for (const reset of resets) {
     const selected = at({ kind: 'reset', creditId: reset.creditId });
     const expiresAt = reset.expiresAt ? Date.parse(reset.expiresAt) : null;
     // On pause no rule applies anything, so every reset with a deadline waits only to burn; one
@@ -276,26 +287,32 @@ export function renderOverview(model: Overview, { now, timeZone, width = WIDTH, 
       model.paused || model.switching ? [t('burns', 'сгорит'), S.yellow] :
       model.rules?.beforeExpiry && expiresAt - now() <= WINDOW_MS[model.worker.platform] ? [t('applies soon', 'скоро применится'), S.yellow] :
         [timeLeft(expiresAt - now()), S.dim];
-    lines.push(spread([[selected ? '▸ ' : '  ', S.cyan], [resetName(reset.creditId).padEnd(idWidth + 3), selected ? S.cyan : ''], status],
+    lines.push(spread([rail(selected), [resetName(reset.creditId).padEnd(idWidth + 3), selected ? S.cyan : ''], status],
       [[expiresAt === null ? t('no expiry', 'без срока') : shortTime(expiresAt, timeZone), selected ? S.cyan : S.dim]], width));
   }
+  lines.push([['╰─', S.dim]]);
 
   lines.push([]);
-  heading(t('RULES', 'ПРАВИЛА'));
-  if (model.rulesBroken) lines.push([[t('  do not read', '  не читаются'), S.yellow]]);
-  else if (!model.rules) lines.push([[t('  not set', '  не заданы'), S.dim]]);
+  open([[t('RULES', 'ПРАВИЛА'), S.bold]]);
+  if (model.rulesBroken) lines.push([rail(), [t('do not read', 'не читаются'), S.yellow]]);
+  else if (!model.rules) lines.push([rail(), [t('not set', 'не заданы'), S.dim]]);
   for (const rule of model.rules ? RULES : []) {
     const on = model.rules?.[rule], selected = at({ kind: 'rule', rule });
     const check: Segment = rule !== 'weeklyAutoApply' || !on || model.check.state === 'off' ? ['', ''] : model.check.state === 'working' ?
       [t(' · Mac check works', ' · проверка с Mac работает'), S.dim] : [t(' · Mac check is not working', ' · проверка с Mac не работает'), S.yellow];
-    lines.push([[selected ? '▸ ' : '  ', S.cyan], [on ? '☑ ' : '☐ ', on ? S.green : S.dim],
+    lines.push([rail(selected), [on ? '☑ ' : '☐ ', on ? S.green : S.dim],
       [ruleLabel(rule, model.worker.platform), selected ? S.cyan : on ? '' : S.dim], check]);
   }
+  lines.push([['╰─', S.dim]]);
 
   const worker = workerState(model, timeZone), last = lastEvent(model, timeZone);
-  lines.push([], [['● ', TONES[worker.tone]], [worker.text, '']]);
-  if (last) lines.push([[`  ${last}`, S.dim]]);
-  lines.push([[`  ${model.worker.platform === 'github' ? model.worker.repo.html_url : projectUrl(model.worker.scriptId)}`, S.dim]]);
+  lines.push([]);
+  open([[t('WORKER', 'ВОРКЕР'), S.bold], [` · ${platformName(model.worker.platform)}`, S.dim]],
+    [['● ', TONES[worker.tone]], [worker.label, TONES[worker.tone]]]);
+  if (worker.detail) lines.push([rail(), [worker.detail, worker.tone === 'ok' ? '' : TONES[worker.tone]]]);
+  if (last) lines.push([rail(), [last, S.dim]]);
+  if (!toggle) lines.push([rail(), [model.worker.platform === 'github' ? model.worker.repo.html_url : projectUrl(model.worker.scriptId), S.dim]]);
+  lines.push([['╰─', S.dim]]);
   const warnings: (string | null | undefined)[] = [worker.warning];
   if (model.rulesBroken) warnings.push(t('The rules do not read. Choose them again: `aures rules`.',
     'Правила не читаются. Выберите их заново: `aures rules`.'));

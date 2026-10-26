@@ -214,7 +214,7 @@ test('a day of passes: the reset lands within minutes of the weekly quota runnin
 
   const { code, io } = await env.run(status);
   assert.equal(code, 0);
-  assert.ok(io.lines.includes(`  применён reset-b ${shortTime(startedAt, 'UTC')} — кончился недельный лимит`), io.output());
+  assert.ok(io.lines.includes(`│ применён reset-b ${shortTime(startedAt, 'UTC')} — кончился недельный лимит`), io.output());
   assert.deepEqual(world.violations, []);
   assert.deepEqual(world.github.violations, []);
 });

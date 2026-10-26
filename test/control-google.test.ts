@@ -48,11 +48,11 @@ test('status on Google shows the resets, the rules with the one-hour window and 
 
   const { code, io } = await run(status);
   assert.equal(code, 0, io.output());
-  assert.ok(io.lines.includes('СБРОСЫ · 3'), io.output());
-  assert.match(io.output(), /\n {2}reset-c {3}через 1 ч +20 окт 15:00\n/, 'outside the window of an hour it is not «applies soon»');
-  assert.ok(io.lines.includes('  ☑ Перед истечением (в последний час)'));
-  assert.ok(io.lines.includes('● воркер работает · следующий запуск ожидается через 3 мин'), io.output());
-  assert.equal(io.lines.at(-1), `  ${link(project)}`);
+  assert.ok(/СБРОСЫ · 3/.test(io.output()), io.output());
+  assert.match(io.output(), /\n│ reset-c {3}через 1 ч +20 окт 15:00\n/, 'outside the window of an hour it is not «applies soon»');
+  assert.ok(io.lines.includes('│ ☑ Перед истечением (в последний час)'));
+  assert.ok(/● активен\n│ следующий запуск ожидается через 3 мин/.test(io.output()), io.output());
+  assert.ok(io.lines.includes(`│ ${link(project)}`), io.output());
   onlyWebApp();
 });
 
@@ -65,7 +65,7 @@ test('a lost worker session on Google shows in status at once, and login brings 
 
   let { code, io } = await run(status);
   assert.equal(code, 0);
-  assert.ok(io.lines.includes('● последний запуск с ошибкой · 20 окт 13:00'), io.output());
+  assert.ok(/● ошибка запуска\n│ последний запуск с ошибкой · 20 окт 13:00/.test(io.output()), io.output());
   assert.equal(io.lines.at(-1), '! Воркер потерял вход в ChatGPT. Войдите заново: `aures login`. ' +
     `Подробности: ${link(project)}/executions`);
 
@@ -158,7 +158,7 @@ test('a Mac without the install record asks where the worker is and finds it on 
   assert.match(io.output(), /Воркер найден: https:\/\/script\.google\.com\/macros\/s\/.*\/exec/);
   assert.deepEqual(await mac.files.readInstall(), install);
   assert.equal(await keychain.entries.get('worker-secret'), world.google.deployedSecret(project));
-  assert.ok(io.lines.includes('СБРОСЫ · 2'), io.output());
+  assert.ok(/СБРОСЫ · 2/.test(io.output()), io.output());
 
   // From now on the record is there: nothing is asked.
   const again = await run(status);
@@ -174,7 +174,7 @@ test('a Mac without the install record finds the worker on GitHub by its reposit
   const { code, io } = await env.run(status, { answers: ['1'] });
   assert.equal(code, 0, io.output());
   assert.deepEqual(await env.mac.files.readInstall(), { platform: 'github' });
-  assert.match(io.lines.at(-1) ?? '', /github\.com\/.*\/codex-auto-resets-worker$/);
+  assert.match(io.lines.find(line => line.includes('github.com')) ?? '', /github\.com\/.*\/codex-auto-resets-worker$/);
   assert.equal(env.world.google.requests.length, 0);
 });
 
@@ -243,7 +243,8 @@ test('the screen on Google applies a reset and switches a rule through the worke
   assert.ok(screen);
   const shown = screen;
   const press = async (...names: string[]) => { for (const name of names) await shown.press({ name, sequence: name }); };
-  assert.ok(shown.frame().includes(`  ${link(project)}`), shown.frame().join('\n'));
+  // The link is on the screen «Воркер», not among the resets (issue 03).
+  assert.ok(!shown.frame().some(line => line.includes(link(project))), shown.frame().join('\n'));
 
   await press('down', 'down', 'down', 'return');
   // Setup left the weekly rule on (issue 24), so the screen switches it off here.

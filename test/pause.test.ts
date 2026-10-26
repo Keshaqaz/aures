@@ -78,11 +78,11 @@ test('the overview on pause keeps warning and marks every reset «сгорит»
   await run(pauseWorker);
   const { code, io } = await run(status);
   assert.equal(code, 0, io.output());
-  assert.ok(io.lines.includes('● воркер на паузе'), io.output());
-  assert.match(io.lines[4] ?? '', /^ {2}reset-b {3}сгорит +22 окт 15:00$/);
-  assert.match(io.lines[5] ?? '', /^ {2}reset-a {3}сгорит +25 окт 12:00$/);
+  assert.ok(/● на паузе/.test(io.output()), io.output());
+  assert.match(io.lines[4] ?? '', /^│ reset-b {3}сгорит +22 окт 15:00$/);
+  assert.match(io.lines[5] ?? '', /^│ reset-a {3}сгорит +25 окт 12:00$/);
   assert.match(io.lines.at(-1) ?? '', /^! Воркер на паузе: сбросы не применяются и каждый сгорит в свой срок активации\./);
-  assert.doesNotMatch(io.output(), /скоро применится|воркер работает/, 'nothing is applied on pause');
+  assert.doesNotMatch(io.output(), /скоро применится|следующий запуск/, 'nothing is applied on pause');
 });
 
 test('apply-now on pause applies the reset and leaves the schedule off', async () => {
@@ -149,8 +149,8 @@ test('status on Google on pause says so and marks the resets «сгорит»', 
   await run(pauseWorker);
   const { code, io } = await run(status);
   assert.equal(code, 0, io.output());
-  assert.ok(io.lines.includes('● воркер на паузе'), io.output());
-  assert.match(io.lines[4] ?? '', /^ {2}reset-b {3}сгорит +22 окт 15:00$/);
+  assert.ok(/● на паузе/.test(io.output()), io.output());
+  assert.match(io.lines[4] ?? '', /^│ reset-b {3}сгорит +22 окт 15:00$/);
   assert.match(io.lines.at(-1) ?? '', /^! Воркер на паузе: сбросы не применяются и каждый сгорит в свой срок активации\./);
   assert.doesNotMatch(io.output(), /нет расписания|Почините воркер/, 'a pause is not a broken worker');
   onlyWebApp();

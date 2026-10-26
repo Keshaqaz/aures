@@ -8,13 +8,24 @@ export type Segment = [text: string, style: string];
 
 const len = (text: string): number => [...text].length;
 
-// Where the rest of a folded line starts: after a leading column that ends in two spaces (the
-// time of a journal line), or else after the line's indent and its marks (▸, ●, !, ☑, ☐).
+// The marks a line can start with: the pointer of a list, a state, a warning, a checkbox, the
+// rail of a bracket (issue 03).
+const isMarks = (text: string): boolean => /^(?:[ ▸●!☑☐│┃╎] ?)*$/u.test(text);
+
+// Where the rest of a folded line starts: after the leading columns of a line — each ending in
+// two spaces (the time and the who of a journal line), past the rail of its bracket — or else
+// after the line's indent and its marks.
 function hangOf(line: Segment[], width: number): number {
-  const [first] = line;
-  if (first && first[0].endsWith('  ') && first[0].trim() && len(first[0]) <= width / 2) return len(first[0]);
-  const plain = line.map(([text]) => text).join('');
-  const hang = len(/^(?:[ ▸●!☑☐] ?)*/u.exec(plain)?.[0] ?? '');
+  let at = 0, column = 0, rail = true;
+  for (const [text] of line) {
+    at += len(text);
+    if (rail && isMarks(text)) continue;
+    rail = false;
+    if (text.endsWith('  ') && (text.trim() || column)) column = at;
+    else if (text.trim()) break;
+  }
+  if (column && column <= width / 2) return column;
+  const hang = len(/^(?:[ ▸●!☑☐│┃╎] ?)*/u.exec(line.map(([text]) => text).join(''))?.[0] ?? '');
   return hang <= width / 2 ? hang : 0;
 }
 

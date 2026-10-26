@@ -43,7 +43,7 @@ test('GitHub → Google → GitHub: the rules move, the old worker is quenched, 
   const minute = workflowMinute(world.github.text(repo, FILES.workflow));
 
   await press(...TO_SWITCH);
-  assert.match(text(), /\n {2}Проверить сейчас {3}Починить {3}Пауза ▸ Переключиться на Google Apps Script\n/);
+  assert.match(text(), /\n┃ Проверить сейчас {2,3}Починить {2,3}Пауза {2,3}Переключиться на Google Apps Script\n/);
   await press('return');
   assert.equal(env.screen.busy, null);
   assert.deepEqual(env.breaches, []);
@@ -65,8 +65,8 @@ test('GitHub → Google → GitHub: the rules move, the old worker is quenched, 
   const install = await mac.files.readInstall();
   assert.deepEqual(install, { platform: 'google', google: { scriptId: project.scriptId, deploymentId: [...project.deployments.keys()][0],
     url: install?.google?.url }, accounts: { ...ACCOUNTS, google: 'owner@example.invalid' } });
-  assert.match(text(), /\nВОРКЕР · Google Apps Script {3,}● активен\n/);
-  assert.match(text(), /\n▸ Проверить сейчас {3}Починить {3}Пауза {3}Переключиться на GitHub Actions\n/);
+  assert.match(text(), /\n╭─ ВОРКЕР · Google Apps Script {3,}● активен\n/);
+  assert.match(text(), /\n┃ Проверить сейчас {3}Починить {3}Пауза {3}Переключиться на GitHub Actions\n/);
   assert.deepEqual(switchSteps(env), [
     'Переключение: Переключаемся на Google Apps Script. Esc отменяет до гашения старого воркера.',
     'Переключение: Входим в Google…',
@@ -114,7 +114,7 @@ test('GitHub → Google → GitHub: the rules move, the old worker is quenched, 
   assert.deepEqual(env.active(), ['github']);
   assert.deepEqual(await mac.files.readInstall(), { platform: 'github', google: install?.google,
     accounts: { ...ACCOUNTS, google: 'owner@example.invalid' } });
-  assert.match(text(), /\nВОРКЕР · GitHub Actions {3,}● активен\n/);
+  assert.match(text(), /\n╭─ ВОРКЕР · GitHub Actions {3,}● активен\n/);
   assert.match(switchSteps(env).at(-2) ?? '', /^Переключение: Воркер работает\./);
   assert.equal(switchSteps(env).at(-1), 'Переключение: Воркер переключён на GitHub Actions. Старый на Google Apps Script погашен, его проект сохранён ' +
     'для обратного переключения.');
@@ -179,7 +179,7 @@ test('a pending application refuses the switch with the reason, and nothing chan
   assert.equal(repo.commits.length, commits);
   assert.equal(world.google.requests.length, requests, 'nothing is prepared on Google');
   stillActive(env, 'github');
-  assert.match(text(), /\nВОРКЕР · GitHub Actions {3,}● активен\n/);
+  assert.match(text(), /\n╭─ ВОРКЕР · GitHub Actions {3,}● активен\n/);
 
   // Once the next run settles it, the switch goes.
   await world.github.schedule();
@@ -259,7 +259,7 @@ for (const [from, moments] of [['github', GITHUB_TO_GOOGLE], ['google', GOOGLE_T
       assert.deepEqual(after?.accounts?.chatgpt, install?.accounts?.chatgpt);
       stillActive(env, from);
       assert.deepEqual(env.breaches, []);
-      assert.match(text(), new RegExp(`\\nВОРКЕР · ${from === 'github' ? 'GitHub Actions' : 'Google Apps Script'} {3,}● активен\\n`));
+      assert.match(text(), new RegExp(`\\n╭─ ВОРКЕР · ${from === 'github' ? 'GitHub Actions' : 'Google Apps Script'} {3,}● активен\\n`));
       assert.ok(!switchSteps(env).some(step => /Гасим|Отзываем/.test(step)), 'the quench never began');
     });
   }
@@ -320,15 +320,15 @@ test('a failure to turn the new schedule on leaves no active worker, and «По�
   assert.deepEqual((await mac.files.readInstall())?.switching, { from: 'github', quenched: true });
   assert.equal((await mac.files.readInstall())?.platform, 'google');
   assert.match(switchSteps(env).at(-1) ?? '', /^Переключение: Расписание нового воркера не включилось: Google недоступен\. .* Переключение площадки не завершено: активного воркера нет/);
-  assert.match(text(), /\nВОРКЕР · Google Apps Script\n─+\n● активного воркера нет: переключение не завершено\n/);
-  assert.match(text(), /\n▸ Повторить переключение\n/, 'the only action is to finish the switch');
+  assert.match(text(), /\n╭─ ВОРКЕР · Google Apps Script {3,}● нет активного воркера\n│ переключение не завершено\n/);
+  assert.match(text(), /\n┃ Повторить переключение\n/, 'the only action is to finish the switch');
   // Nothing wakes a worker meanwhile, and setup would not schedule one.
   const lines: string[] = [];
   await watch({ fetch: world.fetch, keychain: env.keychain, secretKeychain: env.secretKeychain, files: mac.files, log: line => lines.push(line),
     now: () => world.now });
   assert.deepEqual(lines, ['switching']);
   const told = await env.run(status);
-  assert.ok(told.io.lines.includes('● активного воркера нет: переключение не завершено'), told.io.output());
+  assert.ok(/● нет активного воркера\n│ переключение не завершено\n/.test(told.io.output()), told.io.output());
   assert.match(told.io.output(), /! Переключение площадки не завершено: активного воркера нет, сбросы не применяются\. Откройте экран «Воркер» \(`aures`, затем Tab\) и выберите «Повторить переключение»\./);
   const repeated = await env.run(setup);
   assert.equal(repeated.code, 1);
@@ -344,7 +344,7 @@ test('a failure to turn the new schedule on leaves no active worker, and «По�
   assert.equal(switchSteps(env).at(-1), 'Переключение: Воркер переключён на Google Apps Script. Старый на GitHub Actions погашен, его репозиторий ' +
     'сохранён для обратного переключения.');
   assert.ok(!switchSteps(env).slice(-6).some(step => step.includes('Гасим')), 'the retry does not quench again');
-  assert.match(text(), /\nВОРКЕР · Google Apps Script {3,}● активен\n/);
+  assert.match(text(), /\n╭─ ВОРКЕР · Google Apps Script {3,}● активен\n/);
 });
 
 test('a failure while quenching leaves no active worker, and the retry quenches the old one before the new schedule', async () => {
@@ -402,7 +402,7 @@ async function undone(env: World, from: 'github' | 'google', why: RegExp) {
   assert.deepEqual(install?.accounts?.chatgpt, ACCOUNTS.chatgpt);
   stillActive(env, from);
   assert.deepEqual(env.breaches, []);
-  assert.match(env.text(), new RegExp(`\\nВОРКЕР · ${old} {3,}● активен\\n`));
+  assert.match(env.text(), new RegExp(`\\n╭─ ВОРКЕР · ${old} {3,}● активен\\n`));
 }
 
 test('while a switch is unfinished, apply-now refuses on the command line and on the screen: the new worker spends nothing', async () => {

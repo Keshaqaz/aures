@@ -50,7 +50,7 @@ test('upgrade on Google puts the new bundle into the same deployment: the URL, t
   // The worker answers this Mac under the same URL with the new secret.
   const shown = await run(status);
   assert.equal(shown.code, 0, shown.io.output());
-  assert.ok(shown.io.lines.includes('СБРОСЫ · 2'), shown.io.output());
+  assert.ok(shown.io.lines.includes('╭─ СБРОСЫ · 2'), shown.io.output());
   assert.deepEqual(world.google.violations, []);
 });
 
