@@ -9,7 +9,7 @@ import { saveRules, storedRules } from './rules.ts';
 import { openWorker } from './active-worker.ts';
 import type { Worker, OpenWorkerOptions } from './active-worker.ts';
 import type { Io, Rule, Sleep } from './common.ts';
-import { fit } from './fit.ts';
+import { fitOnRail } from './fit.ts';
 import type { Segment } from './fit.ts';
 import { readOverview, renderOverview, overviewItems, sameItem, headerLine, ruleLine, countdown, lastScheduled, workerTone, lastRunFailed,
   paint, S, WIDTH } from './overview.ts';
@@ -151,6 +151,7 @@ export class Screen {
   scheduledAt: number | null = null; // the latest scheduled run seen
   flashAt: number | null = null; // when a new scheduled run was seen
   selectedLine = -1; // the line of the last frame the cursor stands on (issue 33)
+  throughLine = -1; // the last line of the frame that belongs to it: an open caption ends there
   width = WIDTH; // the width of the last frame: the journal folds and scrolls to it
   steps: Step[] = []; // what the CLI did on the screen «Воркер», for its journal
   polling: Promise<void> | null = null; // the poll under way
@@ -384,12 +385,17 @@ export class Screen {
     // view (issue 33), so its place is found as the lines fold.
     const picked = lines.slice(0, body).findIndex(([first]) =>
       (first?.[0] === '┃ ' && first[1] === S.cyan) || (first?.[0] === '╭─ ' && first[1] === S.cyan));
+    // An open caption is what the user stopped on the action for: the frame keeps it in view
+    // down to its last line, under the row it belongs to.
+    const worker = this.view === 'worker' && !this.journal && this.captionView() ? bracketOf(lines, 'worker') : [];
+    const through = (worker.at(-1) ?? picked + 1) - 1;
     if (this.motion) this.animate(lines, width);
-    this.selectedLine = -1;
+    this.selectedLine = this.throughLine = -1;
     const folded: Segment[][] = [];
     const part = (from: number, to: number): Segment[][] => lines.slice(from, to).flatMap((line, i) => {
-      const rows = fold ? fit(line, width) : [line];
+      const rows = fold ? fitOnRail(line, width) : [line];
       if (from + i === picked) this.selectedLine = folded.length;
+      if (from + i === through && picked >= 0) this.throughLine = folded.length + rows.length - 1;
       folded.push(...rows);
       return rows;
     });
@@ -755,21 +761,30 @@ export async function openScreen(options: ScreenCommandOptions): Promise<Screen>
 // view — with the cursor on the first item the top shows, on the last the bottom (the journal of
 // the screen «Воркер»). Where lines are hidden a mark says how many. lines are the painted
 // lines of the frame, each one row; selected is the line the cursor stands on, by its index —
-// the Screen finds it as it draws; offset is where the middle started the last time.
-export function viewport(lines: string[], { rows, foot, offset, edge, selected }: { rows: number; foot: number; offset: number;
-  edge: 'first' | 'last' | null; selected: number }): { lines: string[]; offset: number } {
-  const head = 1, middle = lines.slice(head, lines.length - foot), room = rows - head - foot - 2;
-  if (lines.length <= rows || room < 1) return { lines, offset: 0 };
+// the Screen finds it as it draws, through the last line that goes with it (an open caption),
+// kept in view too when the room allows; offset is where the middle started the last time. head
+// is how many lines on top stay: the header, and on the screen the rule under it.
+export function viewport(lines: string[], { rows, foot, offset, edge, selected, through = selected, head = 1 }: { rows: number;
+  foot: number; offset: number; edge: 'first' | 'last' | null; selected: number; through?: number; head?: number }):
+  { lines: string[]; offset: number } {
+  const middle = lines.slice(head, lines.length - foot), space = rows - head - foot, room = space - 2;
+  if (lines.length <= rows) return { lines, offset: 0 };
+  // Too low to keep the rule as well: only the header stays.
+  if (room < 1) return head > 1 ? viewport(lines, { rows, foot, offset, edge, selected, through, head: head - 1 }) : { lines, offset: 0 };
   const pick = selected - head;
   let start = edge === 'first' ? 0 : edge === 'last' ? middle.length - room : offset;
-  if (pick >= 0 && pick < middle.length) start = Math.min(Math.max(start, pick - room + 1), pick);
+  if (pick >= 0 && pick < middle.length) start = Math.min(Math.max(start, Math.max(pick, through - head) - room + 1), pick);
   start = Math.max(0, Math.min(start, middle.length - room));
+  // A mark takes a row only where lines are hidden, so at its top the frame stands where it
+  // stands whole and nothing under the header moves; a bottom with no mark shows a line more.
+  if (start > 0 && start + space - 1 >= middle.length) start = middle.length - (space - 1);
+  const shown = space - (start > 0 ? 1 : 0), bottom = start + shown < middle.length, count = shown - (bottom ? 1 : 0);
   // Blank lines are no lines a user misses.
   const hidden = (part: string[]) => part.filter(line => line.trim()).length;
-  const above = hidden(middle.slice(0, start)), below = hidden(middle.slice(start + room));
+  const above = hidden(middle.slice(0, start)), below = hidden(middle.slice(start + count));
   const mark = (arrow: string, n: number) => n ? paint([[t(`${arrow} ${n} more`, `${arrow} ещё ${n}`), S.dim]], true) : '';
-  return { lines: [...lines.slice(0, head), mark('↑', above), ...middle.slice(start, start + room), mark('↓', below),
-    ...lines.slice(lines.length - foot)], offset: start };
+  return { lines: [...lines.slice(0, head), ...start > 0 ? [mark('↑', above)] : [], ...middle.slice(start, start + count),
+    ...bottom ? [mark('↓', below)] : [], ...lines.slice(lines.length - foot)], offset: start };
 }
 
 // Rows of the terminal a painted line takes: a line longer than the terminal wraps.
@@ -797,7 +812,7 @@ export function runScreen(screen: Screen, { input, output }: Terminal, env: Reco
     const frame = screen.frame(width, true);
     // A frame taller than the terminal moves with the cursor; the blank line on top goes first.
     const fitted = viewport(frame, { rows: (output.rows || 24) - 1, foot: screen.footer, offset, edge: screen.edge(),
-      selected: screen.selectedLine });
+      selected: screen.selectedLine, through: screen.throughLine, head: 2 });
     offset = fitted.offset;
     const lines = ['', ...fitted.lines.map(line => MARGIN + line)];
     // A terminal too low even for that: the top gives way, the action, its codes and the keys are at the bottom.

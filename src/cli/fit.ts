@@ -73,6 +73,18 @@ export function fit(line: Segment[], width: number): Segment[][] {
   });
 }
 
+// A line of a section folded on the rail of its bracket: the rest of it starts with the same
+// rail, so the bracket stays whole around a long link or a row of actions. A line off a rail,
+// or a torn one (an unfinished switch), folds as fit does.
+export function fitOnRail(line: Segment[], width: number): Segment[][] {
+  const rows = fit(line, width), rail = line[0];
+  if (rows.length < 2 || !rail || !/^[│┃╎╏] $/u.test(rail[0])) return rows;
+  return rows.map((row, i) => {
+    const [indent, ...rest] = row;
+    return i && indent?.[0].startsWith('  ') ? [rail, [indent[0].slice(2), indent[1]] as Segment, ...rest] : row;
+  });
+}
+
 // A plain line of text folded the same way.
 export const foldText = (text: string, width: number): string[] =>
   fit([[text, '']], width).map(row => row.map(([part]) => part).join(''));

@@ -198,7 +198,7 @@ test('viewport: the middle follows the cursor, the first item shows the top and 
   const frame = ['header', 'a', '┃ b', 'c', 'd', 'e', 'f', '', 'keys'];
   const plain = (lines: string[]) => lines.map(line => line.replace(/\x1b\[[0-9;]*m/g, ''));
   const first = viewport(frame, { rows: 7, foot: 2, offset: 0, edge: 'first', selected: 2 });
-  assert.deepEqual(plain(first.lines), ['header', '', 'a', '┃ b', '↓ ещё 4', '', 'keys']);
+  assert.deepEqual(plain(first.lines), ['header', 'a', '┃ b', 'c', '↓ ещё 3', '', 'keys'], 'nothing hidden above takes no row');
   const down = ['header', 'a', 'b', 'c', '┃ d', 'e', 'f', '', 'keys'];
   const middle = viewport(down, { rows: 7, foot: 2, offset: first.offset, edge: null, selected: 4 });
   assert.deepEqual(plain(middle.lines), ['header', '↑ ещё 2', 'c', '┃ d', '↓ ещё 2', '', 'keys']);
@@ -208,6 +208,16 @@ test('viewport: the middle follows the cursor, the first item shows the top and 
   const none = viewport(['header', 'a', 'b', '┃ c', 'd', 'e', 'f', '', 'keys'],
     { rows: 7, foot: 2, offset: middle.offset, edge: null, selected: -1 });
   assert.equal(none.offset, middle.offset, 'a frame without a selected line keeps its place');
+  const caption = viewport(['header', 'rule', '', 'a', '┃ b', 'c', 'd', 'e', '', 'keys'],
+    { rows: 8, foot: 2, offset: 0, edge: null, selected: 4, through: 5, head: 2 });
+  assert.deepEqual(plain(caption.lines), ['header', 'rule', '↑ ещё 1', '┃ b', 'c', '↓ ещё 2', '', 'keys'],
+    'the header and its rule stay, the selected line and the lines that go with it are in view');
+  const top = viewport(['header', 'rule', '', 'a', '┃ b', 'c', 'd', 'e', '', 'keys'],
+    { rows: 8, foot: 2, offset: 0, edge: null, selected: 4, head: 2 });
+  assert.deepEqual(plain(top.lines), ['header', 'rule', '', 'a', '┃ b', '↓ ещё 3', '', 'keys'], 'the top stands as the whole frame has it');
+  const low = viewport(['header', 'rule', '', 'a', '┃ b', 'c', 'd', 'e', '', 'keys'],
+    { rows: 6, foot: 2, offset: 0, edge: null, selected: 4, head: 2 });
+  assert.deepEqual(plain(low.lines), ['header', '↑ ещё 2', '┃ b', '↓ ещё 3', '', 'keys'], 'too low for the rule: only the header stays');
   const fits = viewport(frame, { rows: 20, foot: 2, offset: 3, edge: null, selected: 2 });
   assert.deepEqual(fits, { lines: frame, offset: 0 });
 });
@@ -302,6 +312,38 @@ test('the screen «Воркер» on GitHub: Tab opens it from the resets and go
   assert.equal(screen.view, 'resets');
   assert.match(text(), /СБРОСЫ · 2[\s\S]*ПРАВИЛА/);
   assert.equal(screen.frame().at(-1), HINT);
+});
+
+test('a long line of a section folds on the rail of its bracket: the bracket stays whole', async () => {
+  const { screen, press, project } = await openedOnGoogle();
+  await press('tab');
+  const frame = screen.frame(50, false, true);
+  const from = frame.findIndex(line => line.startsWith('╭─ ВОРКЕР')), to = frame.findIndex((line, i) => i > from && line.startsWith('╰─'));
+  const section = frame.slice(from + 1, to);
+  assert.ok(section.some(line => line === `│ ${project.scriptId}`), section.join('\n'));
+  assert.ok(section.every(line => /^[│┃]/.test(line)), `every line on the rail:\n${section.join('\n')}`);
+});
+
+test('the terminal: an open caption keeps the header and its rule in place and comes into view', async () => {
+  const { world, screen } = await openedOnGoogle();
+  const { input, done, press, written } = terminal(screen, { columns: 100, rows: 18 });
+  try {
+    await press('\t');
+    while (screen.busy !== null || screen.view !== 'worker') await new Promise(resolve => setImmediate(resolve));
+    const rule = (text: string) => [...text.matchAll(/\x1b\[(\d+);1H {2}\x1b\[2m[─━╸]/g)].map(([, row]) => Number(row));
+    assert.deepEqual(rule(written()).slice(-1), [3]);
+    await press('\x1b[C'); // →: on «Починить»
+    world.advance(400);
+    const from = written().length;
+    (screen.changed as () => void)();
+    const after = written().slice(from);
+    assert.doesNotMatch(after, /\x1b\[3;1H\x1b\[2K\x1b\[3;1H\x1b\[\?2026l|\x1b\[4;1H {2}\x1b\[2m[─━╸]/, 'the rule stays on its row');
+    assert.match(visible(after), /вручную/, 'the last line of the caption is in view');
+    assert.match(visible(after), /↑ ещё \d+/, 'what went up is marked');
+  } finally {
+    input.write('q');
+    assert.equal(await done, 0);
+  }
 });
 
 test('the screen «Воркер» on Google: the platform, its accounts and the caption of «Починить» by dwell', async () => {
