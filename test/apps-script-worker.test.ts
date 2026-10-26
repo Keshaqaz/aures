@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, mkdtemp } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { buildAppsScript } from '../scripts/build-worker.ts';
 import { MANIFEST, TICK_FUNCTION } from '../src/apps-script/layout.ts';
@@ -11,6 +10,7 @@ import type { FakeWorld } from './support/fake-world.ts';
 import { fakeAppsScript, bundle, PROPERTY_VALUE_LIMIT } from './support/fake-apps-script.ts';
 import type { FakeAppsScript, Reply } from './support/fake-apps-script.ts';
 import type { Session } from '../src/chatgpt/session.ts';
+import { tempDir } from './support/temp-dir.ts';
 
 const MINUTE = 60_000, HOUR = 3600_000, DAY = 24 * HOUR;
 const SECRET = 'fake-secret-0123456789';
@@ -44,7 +44,7 @@ const noViolations = (world: FakeWorld, gas: FakeAppsScript) => {
 };
 
 test('the bundle is one plain script with global tick, doGet and doPost, and the manifest makes it an anonymous web app', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'apps-script-build-'));
+  const dir = await tempDir('apps-script-build-');
   const text = await readFile(await buildAppsScript(join(dir, 'worker.js')), 'utf8');
   assert.equal(text, await bundle());
   assert.doesNotMatch(text, /^\s*(import|export)\s/m);

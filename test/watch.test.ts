@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, stat } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { writeFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { decide, quiet, watch, DISPATCHES, NEAR_PERCENT, QUIET_MS } from '../src/cli/watch.ts';
 import type { PassFiles } from '../src/cli/watch.ts';
@@ -16,6 +15,7 @@ import { window } from './support/fake-world.ts';
 import type { FakeWorld } from './support/fake-world.ts';
 import { cliWorld } from './support/cli-world.ts';
 import { FILES } from '../src/worker/layout.ts';
+import { tempDir } from './support/temp-dir.ts';
 
 const MINUTE = 60_000, HOUR = 60 * MINUTE, DAY = 24 * HOUR;
 const NOW = Date.parse('2026-10-20T12:00:00Z');
@@ -314,7 +314,7 @@ test('watch exits with 0 whatever breaks', async () => {
 });
 
 test('watch files keep the session private and read a broken file as empty', async () => {
-  const dir = join(await mkdtemp(join(tmpdir(), 'watch-files-')), 'aures');
+  const dir = join(await tempDir('watch-files-'), 'aures');
   const files = new WatchFiles({ dir });
   assert.equal(await files.readSession(), null);
   assert.deepEqual(await files.readState(), {});
@@ -334,7 +334,7 @@ test('watch files keep the session private and read a broken file as empty', asy
 });
 
 test('watch files of another shape read as none: no session, an empty watch.json, no language', async () => {
-  const dir = join(await mkdtemp(join(tmpdir(), 'watch-files-')), 'aures');
+  const dir = join(await tempDir('watch-files-'), 'aures');
   const files = new WatchFiles({ dir });
   await files.writeState({});
   for (const text of ['[]', 'null', '"text"', '7']) {

@@ -1,12 +1,12 @@
 // This Mac as the CLI sees it: launchctl, the LaunchAgents and Logs folders and the watch
 // files, all in a temporary home.
-import { mkdtemp, readFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { LaunchAgent } from '../../src/cli/launch-agent.ts';
 import type { Launchctl } from '../../src/cli/launch-agent.ts';
 import { WatchFiles } from '../../src/cli/watch-files.ts';
 import type { Mac } from '../../src/cli/mac-check.ts';
+import { tempDir } from './temp-dir.ts';
 
 export const UID = 501;
 export const PROGRAM = ['/opt/homebrew/opt/aures/bin/aures', 'watch'];
@@ -50,7 +50,7 @@ export function fakeLaunchctl(): FakeLaunchctl {
 
 export interface FakeMac extends Mac { home: string; launchctl: FakeLaunchctl }
 export async function fakeMac(): Promise<FakeMac> {
-  const home = await mkdtemp(join(tmpdir(), 'fake-mac-'));
+  const home = await tempDir('fake-mac-');
   const launchctl = fakeLaunchctl();
   const agent = new LaunchAgent({ home, uid: UID, program: PROGRAM, launchctl: launchctl.run, sleep: async () => {} });
   const files = new WatchFiles({ dir: join(home, 'Library', 'Application Support', 'codex-auto-resets') });

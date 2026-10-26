@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, mkdtemp } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setup } from '../src/cli/setup.ts';
 import { buildWorker } from '../scripts/build-worker.ts';
@@ -11,6 +10,7 @@ import type { Summary } from '../src/worker/summary.ts';
 import { credit } from './support/fake-world.ts';
 import { cliWorld, terminal, WORKER_SOURCE } from './support/cli-world.ts';
 import type { CliFakeWorld, RunOptions } from './support/cli-world.ts';
+import { tempDir } from './support/temp-dir.ts';
 
 const HOUR = 3600_000, DAY = 24 * HOUR;
 // What setup ends with when the worker is not paused: it runs on its own.
@@ -75,7 +75,7 @@ test('setup goes from nothing to a working worker in a private repository', asyn
 });
 
 test('end to end: the worker setup committed runs on plain node and ticks on the files setup wrote', async () => {
-  const built = await buildWorker(join(await mkdtemp(join(tmpdir(), 'setup-build-')), 'worker.mjs'));
+  const built = await buildWorker(join(await tempDir('setup-build-'), 'worker.mjs'));
   const { world, run } = await installWorld({ node: true, workerSource: await readFile(built, 'utf8') });
   world.chatgpt.credits.push(credit('reset-due', world.now + 3 * HOUR));
   const { code, io } = await run();

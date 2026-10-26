@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, mkdtemp } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setup } from '../src/cli/setup.ts';
 import { status } from '../src/cli/status.ts';
@@ -16,6 +15,7 @@ import type { Summary } from '../src/worker/summary.ts';
 import { credit, window } from './support/fake-world.ts';
 import { cliWorld } from './support/cli-world.ts';
 import pkg from '../package.json' with { type: 'json' };
+import { tempDir } from './support/temp-dir.ts';
 
 const HOUR = 3600_000, DAY = 24 * HOUR;
 
@@ -330,7 +330,7 @@ test('login refuses a worker whose workflow does not pass the login secret', asy
 });
 
 test('end to end on the built worker: rules, apply-now and login reach the worker on plain node', async () => {
-  const built = await buildWorker(join(await mkdtemp(join(tmpdir(), 'control-build-')), 'worker.mjs'));
+  const built = await buildWorker(join(await tempDir('control-build-'), 'worker.mjs'));
   const { world, run, summary } = await installed({ node: true, workerSource: await readFile(built, 'utf8') });
 
   assert.equal((await run(rules, { answers: ['2', ''] })).code, 0);

@@ -2,12 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ChildProcess } from 'node:child_process';
 import { PassThrough } from 'node:stream';
-import { mkdtemp, stat, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { languageOfLocale, readSystemLanguage, startLanguage } from '../src/cli/language.ts';
 import type { SpawnDefaults } from '../src/cli/language.ts';
 import { WatchFiles } from '../src/cli/watch-files.ts';
+import { tempDir } from './support/temp-dir.ts';
 
 // Fake `/usr/bin/defaults read -g AppleLanguages`: prints stdout and exits with code, ends
 // in an error instead, or cannot run at all.
@@ -37,7 +37,7 @@ test('without a picked language the CLI follows the system: ru* → ru, anything
 });
 
 test('the language picked in settings.json beats the system, and the system choice writes nothing', async () => {
-  const dir = join(await mkdtemp(join(tmpdir(), 'language-')), 'aures');
+  const dir = join(await tempDir('language-'), 'aures');
   const files = new WatchFiles({ dir });
   // As main starts with no settings.json: the system's language, and no file written for it.
   assert.equal(startLanguage(await files.readLanguage(), 'ru-RU'), 'ru');

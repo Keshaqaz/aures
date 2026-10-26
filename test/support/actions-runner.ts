@@ -4,16 +4,16 @@
 // through the files and the secrets, as on GitHub. With { node: true } the run executes the worker.mjs
 // found in the repository on plain node, as the workflow does; that child process sees a copy
 // of the fake world (clock, sessions, quotas and resets) and its changes stay in the child.
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { execFileSync, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { runWorker, runLine } from '../../src/worker/run.ts';
 import { FILES, STATE_KEY_SECRET, LOGIN_SECRET, REVOKE_INPUT, TRIAL_INPUT } from '../../src/worker/layout.ts';
 import type { FakeWorld } from './fake-world.ts';
 import type { Runner } from './fake-github.ts';
 import type { CliFakeWorld } from './cli-world.ts';
+import { tempDir } from './temp-dir.ts';
 
 const git = (cwd: string, ...args: string[]): string => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: 'pipe' });
 const AUTHOR = ['-c', 'user.name=fake-github', '-c', 'user.email=fake-github@example.invalid'];
@@ -39,7 +39,7 @@ async function nodeWorker(world: FakeWorld, root: string, dir: string, key: stri
 
 export function actionsRunner(world: CliFakeWorld, { node = false }: { node?: boolean } = {}): Runner {
   return async (repo, run) => {
-    const root = await mkdtemp(join(tmpdir(), 'actions-run-'));
+    const root = await tempDir('actions-run-');
     const origin = join(root, 'origin.git'), seed = join(root, 'seed'), dir = join(root, 'checkout');
     git(root, 'init', '--quiet', '--bare', '-b', 'main', origin);
     git(root, 'clone', '--quiet', origin, seed);

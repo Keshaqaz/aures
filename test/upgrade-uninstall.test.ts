@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, mkdtemp } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setup } from '../src/cli/setup.ts';
 import { upgrade } from '../src/cli/upgrade.ts';
@@ -16,6 +15,7 @@ import { workflowYaml } from '../src/worker/workflow.ts';
 import { cliWorld } from './support/cli-world.ts';
 import type { CliFakeWorld } from './support/cli-world.ts';
 import type { FakeRepository } from './support/fake-github.ts';
+import { tempDir } from './support/temp-dir.ts';
 
 const OAUTH_APP_LINK = `https://github.com/settings/connections/applications/${GITHUB_OAUTH_CLIENT_ID}`;
 const NEW_WORKER = '// fake worker bundle, next version\n';
@@ -67,7 +67,7 @@ test('upgrade on the current version writes nothing', async () => {
 });
 
 test('end to end: the upgraded workflow and built worker revoke the session on plain node', async () => {
-  const built = await readFile(await buildWorker(join(await mkdtemp(join(tmpdir(), 'upgrade-build-')), 'worker.mjs')), 'utf8');
+  const built = await readFile(await buildWorker(join(await tempDir('upgrade-build-'), 'worker.mjs')), 'utf8');
   const { world, repo, run } = await installed({ node: true, workerSource: '// older worker\n' });
   world.github.write(repo, FILES.workflow, olderWorkflow(30));
   assert.equal((await run(upgrade, { workerSource: built })).code, 0);

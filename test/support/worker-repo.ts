@@ -1,12 +1,12 @@
 // A worker repository on local git: a bare origin seeded the way setup seeds it, and a
 // clone of it as the Actions checkout. Reads go to origin, so a test sees only what was pushed.
-import { mkdtemp, writeFile, readFile } from 'node:fs/promises';
+import { writeFile, readFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FILES } from '../../src/worker/layout.ts';
 import { sealState, openState, generateKey } from '../../src/worker/state-file.ts';
 import type { State, Rules } from '../../src/worker/state-file.ts';
+import { tempDir } from './temp-dir.ts';
 
 const git = (cwd: string, ...args: string[]): string => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: 'pipe' }).trim();
 const AUTHOR = ['-c', 'user.name=cli', '-c', 'user.email=cli@example.invalid'];
@@ -25,7 +25,7 @@ export interface WorkerRepo {
 }
 
 export async function workerRepo({ state, rules }: { state: State; rules: Rules }): Promise<WorkerRepo> {
-  const root = await mkdtemp(join(tmpdir(), 'worker-repo-'));
+  const root = await tempDir('worker-repo-');
   const origin = join(root, 'origin.git'), seed = join(root, 'seed'), dir = join(root, 'checkout');
   const key = generateKey();
   git(root, 'init', '--quiet', '--bare', '-b', 'main', origin);

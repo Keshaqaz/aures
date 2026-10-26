@@ -1,9 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, writeFile, readdir } from 'node:fs/promises';
+import { readFile, writeFile, readdir } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildWorker } from '../scripts/build-worker.ts';
 import { workflowYaml } from '../src/worker/workflow.ts';
@@ -12,6 +11,7 @@ import { generateKey } from '../src/worker/state-file.ts';
 import type { Summary } from '../src/worker/summary.ts';
 import { fakeWorld } from './support/fake-world.ts';
 import { workerRepo } from './support/worker-repo.ts';
+import { tempDir } from './support/temp-dir.ts';
 
 const run = promisify(execFile);
 const RULES = { formatVersion: 1, beforeExpiry: true, weeklyAutoApply: false };
@@ -44,7 +44,7 @@ test('the workflow runs hourly on a static cron at the chosen minute, one run at
 });
 
 async function bundled() {
-  const dir = await mkdtemp(join(tmpdir(), 'worker-build-'));
+  const dir = await tempDir('worker-build-');
   const file = await buildWorker(join(dir, FILES.worker));
   return { dir, file, text: await readFile(file, 'utf8') };
 }
