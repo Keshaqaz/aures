@@ -239,7 +239,7 @@ test('setup starts over in a new project when the user deleted the old one', asy
 test('the screen on Google applies a reset and switches a rule through the worker', async () => {
   const { run, property, journal, project, onlyWebApp } = await installed();
   let screen: Screen | undefined;
-  await run(async options => { screen = await openScreen(options); return 0; });
+  await run(async options => { screen = await openScreen(options); screen.motion = false; return 0; });
   assert.ok(screen);
   const shown = screen;
   const press = async (...names: string[]) => { for (const name of names) await shown.press({ name, sequence: name }); };

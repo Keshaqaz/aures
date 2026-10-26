@@ -9,8 +9,8 @@ export type Segment = [text: string, style: string];
 const len = (text: string): number => [...text].length;
 
 // The marks a line can start with: the pointer of a list, a state, a warning, a checkbox, the
-// rail of a bracket (issue 03).
-const isMarks = (text: string): boolean => /^(?:[ ▸●!☑☐│┃╎] ?)*$/u.test(text);
+// rail of a bracket (issue 03) and the cells its runners light (issue 04).
+const isMarks = (text: string): boolean => /^(?:[ ▸●!☑☐│┃╎╏┏┗━] ?)*$/u.test(text);
 
 // Where the rest of a folded line starts: after the leading columns of a line — each ending in
 // two spaces (the time and the who of a journal line), past the rail of its bracket — or else
@@ -25,7 +25,7 @@ function hangOf(line: Segment[], width: number): number {
     else if (text.trim()) break;
   }
   if (column && column <= width / 2) return column;
-  const hang = len(/^(?:[ ▸●!☑☐│┃╎] ?)*/u.exec(line.map(([text]) => text).join(''))?.[0] ?? '');
+  const hang = len(/^(?:[ ▸●!☑☐│┃╎╏┏┗━] ?)*/u.exec(line.map(([text]) => text).join(''))?.[0] ?? '');
   return hang <= width / 2 ? hang : 0;
 }
 

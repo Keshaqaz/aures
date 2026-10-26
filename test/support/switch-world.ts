@@ -81,7 +81,7 @@ export async function switchWorld(platform: Platform, { answers = [''] }: { answ
     world.advance(ms);
   };
   const reopen = async () => {
-    await env.run(async options => { screen = await openScreen({ ...options, fetch, sleep }); return 0; });
+    await env.run(async options => { screen = await openScreen({ ...options, fetch, sleep }); screen.motion = false; return 0; });
     assert.ok(screen);
     const shown = screen;
     shown.changed = () => { void check(`frame: ${shown.busy ?? ''}`); };

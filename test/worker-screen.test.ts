@@ -253,9 +253,9 @@ test('every action has its own caption', () => {
     assert.match(lines[11] ?? '', new RegExp(`^│ {3}${start}`), `the caption of action ${i}`);
   }
   const retry = plain(render(page({ switching: { from: 'github' } }), { cursor: FIRST_ACTION, caption: true }));
-  assert.match(retry[12] ?? '', /^│ {3}Довести переключение/, 'the caption comes under its rule');
+  assert.match(retry[12] ?? '', /^[│ ] {3}Довести переключение/, 'the caption comes under its rule, on a torn bracket');
   const paused = plain(render(page({ paused: true }), { cursor: FIRST_ACTION + 2, caption: true }));
-  assert.match(paused[11] ?? '', /^│ {3}Вернуть расписание/);
+  assert.match(paused[11] ?? '', /^╎ {3}Вернуть расписание/);
 });
 
 test('the height of the window: the body of the screen matches the overview, the window 3–10 rows', () => {

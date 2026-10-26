@@ -150,12 +150,13 @@ const nextRun = (nextRunAt: number | null, readAt: number): WorkerState => {
 const executions = (scriptId: string): string => `${projectUrl(scriptId)}/executions`;
 
 // The worker in its label beside the section heading, the detail under it and what the user
-// should do about it (issue 03).
-function workerState({ worker, readAt, paused, switching }: Overview, timeZone?: string): WorkerState {
+// should do about it (issue 03). The next run counts down to now, as the rule under the header
+// does (issue 04).
+function workerState({ worker, readAt, paused, switching }: Overview, timeZone?: string, now = readAt): WorkerState {
   if (switching) return { tone: 'bad', label: t('no active worker', 'нет активного воркера'),
     detail: t('the switch is not finished', 'переключение не завершено'), warning: switchUnfinished() };
   if (paused) return pausedWorker();
-  if (worker.platform === 'google') return googleState(worker, readAt, timeZone);
+  if (worker.platform === 'google') return googleState(worker, readAt, timeZone, now);
   const { repo, workflowState, lastRun, lastScheduledAt, nextRunAt } = worker;
   if (!workflowState) return { tone: 'warn', label: t('setup unfinished', 'установка не завершена'), warning: unfinished() };
   if (workflowState !== 'active') {
@@ -181,12 +182,75 @@ function workerState({ worker, readAt, paused, switching }: Overview, timeZone?:
       warning: t(`GitHub has not run the worker on schedule for ${silent}h, and the before-expiry rule depends on it. Check: ${repo.html_url}/actions`,
         `GitHub не запускал воркер по расписанию уже ${silent} ч, а правило перед истечением зависит от этих запусков. Проверьте: ${repo.html_url}/actions`) };
   }
-  return nextRun(nextRunAt, readAt);
+  return nextRun(nextRunAt, now);
+}
+
+// The tone of the worker as the section «ВОРКЕР» tells it, and whether its last run failed: the
+// screen colours its runners by them (issue 04).
+export const workerTone = (model: Overview): Tone => workerState(model).tone;
+export const lastRunFailed = (model: Overview): boolean => !model.switching && !model.paused && failedRun(model) !== null;
+
+// The latest scheduled run in a journal of the worker on Google.
+export const lastScheduled = (journal: { kind: string; at: string }[]): number | null => {
+  const found = journal.findLast(entry => entry.kind === 'scheduled');
+  return found ? Date.parse(found.at) : null;
+};
+
+// From the last scheduled run to the next one expected, the same data as the detail of the
+// section «ВОРКЕР» says (issue 04); approx on GitHub, whose cron keeps no time. scheduledAt is a
+// later scheduled run the screen «Воркер» read in its own journal. null when nothing tells it.
+export interface Countdown { from: number; to: number; approx: boolean }
+export function countdown({ worker }: Overview, scheduledAt: number | null = null): Countdown | null {
+  if (worker.platform === 'google') {
+    const last = Math.max(lastScheduled(worker.journal) ?? -Infinity, scheduledAt ?? -Infinity);
+    return last === -Infinity ? null : { from: last, to: last + TICK_MINUTES * 60_000, approx: false };
+  }
+  const { lastScheduledAt, nextRunAt } = worker;
+  if (lastScheduledAt === null || nextRunAt === null) return null;
+  const from = Math.max(lastScheduledAt, scheduledAt ?? -Infinity);
+  return { from, to: from + nextRunAt - lastScheduledAt, approx: true };
+}
+
+// The rule under the header (issue 04): the part of the wait for the next scheduled run that has
+// passed, heavy (━) up to its end (╸), the rest light — dashed in its last third where the time is
+// only expected. Past the end and no new run seen, all heavy. On pause the whole rule is dashed,
+// with no worker active it is torn, after a failed last run the passed part is yellow.
+export function ruleLine(model: Overview | null, { now, width = WIDTH, scheduledAt = null }:
+  { now: () => number; width?: number; scheduledAt?: number | null }): Segment[] {
+  if (!model) return [['─'.repeat(width), S.dim]];
+  if (model.switching) return [[[...'─'.repeat(width)].map((c, i) => i % 6 === 5 ? ' ' : c).join(''), S.dim]];
+  if (model.paused) return [['╌'.repeat(width), S.dim]];
+  const span = countdown(model, scheduledAt);
+  if (!span || span.to <= span.from) return [['─'.repeat(width), S.dim]];
+  const passed = lastRunFailed(model) ? S.yellow : S.dim;
+  if (now() >= span.to) return [['━'.repeat(width), passed]];
+  const done = Math.floor(width * Math.max(0, now() - span.from) / (span.to - span.from));
+  const rest = width - done - 1, dashed = span.approx ? Math.ceil(rest / 3) : 0;
+  return [['━'.repeat(done), passed], ['╸', passed === S.yellow ? S.yellow : ''], ['─'.repeat(rest - dashed), S.dim],
+    ['╌'.repeat(dashed), S.dim]].filter(([text]) => text) as Segment[];
+}
+
+// The character of a bracket (issue 04): solid while the worker is active, dashed on pause, torn
+// — every third line of the section without its rail — while no worker is active. from is the
+// heading of the section; its lines down to the corner change in place.
+export type Rail = 'solid' | 'dashed' | 'broken';
+export function railed(lines: Segment[][], from: number, rail: Rail): void {
+  if (rail === 'solid') return;
+  for (let i = from; i < lines.length; i++) {
+    const first = lines[i]?.[0];
+    if (!first) continue;
+    const [text, style] = first, line = lines[i] as Segment[];
+    if (i === from) { if (rail === 'dashed') line[0] = [text.replace('─', '╌'), style]; continue; }
+    if (text.startsWith('╰')) { if (rail === 'dashed') line[0] = [text.replace('─', '╌'), style]; return; }
+    if (!text.startsWith('│')) continue;
+    if (rail === 'dashed') line[0] = [text.replace('│', '╎'), style];
+    else if ((i - from) % 3 === 0) line[0] = [text.replace('│', ' '), style];
+  }
 }
 
 // On Google by the schedule and the journal: the latest run of any kind, and the latest scheduled one.
-function googleState({ scriptId, schedule, journal }: Extract<WorkerView, { platform: 'google' }>, readAt: number, timeZone?: string):
-  WorkerState {
+function googleState({ scriptId, schedule, journal }: Extract<WorkerView, { platform: 'google' }>, readAt: number, timeZone?: string,
+  now = readAt): WorkerState {
   if (!schedule) {
     return { tone: 'bad', label: t('no schedule', 'нет расписания'),
       warning: t('Resets are not applied. Repair the worker: «Repair» on the screen «Worker» (Tab in `aures`) puts the schedule back.',
@@ -207,7 +271,7 @@ function googleState({ scriptId, schedule, journal }: Extract<WorkerView, { plat
       warning: t(`Google has not run the worker on schedule for ${silent}h, and the before-expiry rule depends on it. Check: ${executions(scriptId)}`,
         `Google не запускал воркер по расписанию уже ${silent} ч, а правило перед истечением зависит от этих запусков. Проверьте: ${executions(scriptId)}`) };
   }
-  return nextRun(scheduledAt === null ? null : scheduledAt + TICK_MINUTES * 60_000, readAt);
+  return nextRun(scheduledAt === null ? null : scheduledAt + TICK_MINUTES * 60_000, now);
 }
 
 // What the user does about a failed last run, with where to see it.
@@ -272,7 +336,7 @@ export function renderOverview(model: Overview, { now, timeZone, width = WIDTH, 
     lines.push(right.length ? spread([['╭─ ', S.dim], ...name], right, width) : [['╭─ ', S.dim], ...name]);
   };
 
-  lines.push(headerLine({ now, timeZone, width, toggle }), [['─'.repeat(width), S.dim]], []);
+  lines.push(headerLine({ now, timeZone, width, toggle }), ruleLine(model, { now, width }), []);
   const resetsTitle = t('RESETS', 'СБРОСЫ'), resets = model.resets ?? [];
   open([[resetsTitle, S.bold], ...(resets.length ? [[` · ${resets.length}`, S.dim]] as Segment[] : [])]);
   if (!model.resets) lines.push([rail(), [t('not read yet — the worker reads them on its next run', 'ещё не прочитаны — воркер прочитает их при следующем запуске'), S.dim]]);
@@ -305,14 +369,16 @@ export function renderOverview(model: Overview, { now, timeZone, width = WIDTH, 
   }
   lines.push([['╰─', S.dim]]);
 
-  const worker = workerState(model, timeZone), last = lastEvent(model, timeZone);
+  const worker = workerState(model, timeZone, now()), last = lastEvent(model, timeZone);
   lines.push([]);
+  const heading = lines.length;
   open([[t('WORKER', 'ВОРКЕР'), S.bold], [` · ${platformName(model.worker.platform)}`, S.dim]],
     [['● ', TONES[worker.tone]], [worker.label, TONES[worker.tone]]]);
   if (worker.detail) lines.push([rail(), [worker.detail, worker.tone === 'ok' ? '' : TONES[worker.tone]]]);
   if (last) lines.push([rail(), [last, S.dim]]);
   if (!toggle) lines.push([rail(), [model.worker.platform === 'github' ? model.worker.repo.html_url : projectUrl(model.worker.scriptId), S.dim]]);
   lines.push([['╰─', S.dim]]);
+  railed(lines, heading, model.switching ? 'broken' : model.paused ? 'dashed' : 'solid');
   const warnings: (string | null | undefined)[] = [worker.warning];
   if (model.rulesBroken) warnings.push(t('The rules do not read. Choose them again: `aures rules`.',
     'Правила не читаются. Выберите их заново: `aures rules`.'));

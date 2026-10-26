@@ -35,7 +35,7 @@ async function opened({ language = 'ru' }: { language?: Language } = {}) {
     }
     env.world.advance(ms);
   };
-  await env.run(async options => { screen = await openScreen({ ...options, sleep }); return 0; });
+  await env.run(async options => { screen = await openScreen({ ...options, sleep }); screen.motion = false; return 0; });
   assert.ok(screen);
   const shown = screen;
   const press = (...names: string[]) => names.reduce<Promise<unknown>>((done, name) => done.then(() => shown.press({ name, sequence: name })),
@@ -154,7 +154,7 @@ function terminal(screen: Screen, size: { columns: number; rows: number }) {
   const input = new PassThrough(), output = Object.assign(new PassThrough(), size);
   let written = '';
   output.on('data', (chunk: Buffer) => { written += chunk; });
-  const done = runScreen(screen, { input, output });
+  const done = runScreen(screen, { input, output }, { AURES_MOTION: 'off' });
   const press = async (key: string) => { const from = written.length; input.write(key); await new Promise(resolve => setImmediate(resolve));
     return written.slice(from); };
   return { input, done, press, written: () => written };
@@ -266,7 +266,7 @@ async function openedOnGoogle() {
   const { code, io } = await env.run(setup, { answers: ['2', ''] });
   assert.equal(code, 0, io.output());
   let screen: Screen | undefined;
-  await env.run(async options => { screen = await openScreen(options); return 0; });
+  await env.run(async options => { screen = await openScreen(options); screen.motion = false; return 0; });
   assert.ok(screen);
   const shown = screen;
   const press = (...names: string[]) => names.reduce<Promise<unknown>>((done, name) => done.then(() => shown.press({ name, sequence: name })),
@@ -276,7 +276,8 @@ async function openedOnGoogle() {
   return { ...env, project, gas: project.gas, screen: shown, press, text: () => shown.frame().join('\n') };
 }
 // The caption of an action as one line, the way the frame wraps it.
-const caption = (frame: string[]): string => frame.filter(line => /^│ {3}\S/.test(line)).map(line => line.slice(4)).join(' ');
+// The text of a caption; a torn bracket (an unfinished switch) leaves some of its lines without the rail.
+const caption = (frame: string[]): string => frame.filter(line => /^[│╎ ] {3}\S/.test(line)).map(line => line.slice(4)).join(' ');
 
 test('the screen «Воркер» on GitHub: Tab opens it from the resets and goes back', async () => {
   const { screen, press, text } = await opened();
@@ -532,7 +533,7 @@ test('«Починить» on a paused GitHub worker puts the files back but not
   world.github.write(repo, FILES.worker, '// changed by hand\n');
   const before = kept(repo);
   await press('tab');
-  assert.match(text(), /\n╭─ ВОРКЕР · GitHub Actions {3,}● на паузе\n/);
+  assert.match(text(), /\n╭╌ ВОРКЕР · GitHub Actions {3,}● на паузе\n/);
   await press('right', 'return', 'left');
   assert.equal(world.github.text(repo, FILES.worker), '// fake worker bundle\n');
   assert.equal(repo.workflowState, 'disabled_manually');
@@ -574,7 +575,7 @@ test('«Починить» on a paused Google worker deploys the code but leaves
   const { world, run, press, text } = await openedOnGoogle();
   assert.equal((await run(pauseWorker)).code, 0);
   await press('tab');
-  assert.match(text(), /\n╭─ ВОРКЕР · Google Apps Script {3,}● на паузе\n/);
+  assert.match(text(), /\n╭╌ ВОРКЕР · Google Apps Script {3,}● на паузе\n/);
   await press('right', 'return', 'left');
   assert.deepEqual(world.google.project()?.gas?.triggers, []);
   assert.match(text(), /\n[┃│] 12:\d\d {2}вы {2}Починить: Воркер починен: залита версия/);
@@ -590,7 +591,7 @@ test('«Пауза» and «Снять с паузы» on GitHub: the schedule go
   assert.equal(screen.busy, null);
   assert.equal(repo.workflowState, 'disabled_manually');
   assert.deepEqual(await mac.files.readInstall(), { platform: 'github', paused: true, accounts: { chatgpt: 'fake@example.invalid' } });
-  assert.match(text(), /\n╭─ ВОРКЕР · GitHub Actions {3,}● на паузе\n/);
+  assert.match(text(), /\n╭╌ ВОРКЕР · GitHub Actions {3,}● на паузе\n/);
   assert.match(text(), /\n┃ Проверить сейчас {3}Починить {3}Снять с паузы\n/, 'the action that applies to the state');
   assert.doesNotMatch(text(), /Переключиться/);
   assert.match(text(), /\n[┃│] 12:\d\d {2}вы {2}Пауза: Воркер на паузе: расписание снято/);
@@ -613,7 +614,7 @@ test('«Пауза» and «Снять с паузы» on Google: the trigger goe
   assert.equal(screen.busy, null);
   assert.deepEqual(gas.triggers, []);
   assert.equal((await mac.files.readInstall())?.paused, true);
-  assert.match(text(), /\n╭─ ВОРКЕР · Google Apps Script {3,}● на паузе\n/);
+  assert.match(text(), /\n╭╌ ВОРКЕР · Google Apps Script {3,}● на паузе\n/);
   assert.match(text(), /\n┃ Проверить сейчас {3}Починить {3}Снять с паузы\n/);
   assert.match(text(), /\n[┃│] 12:\d\d {2}вы {2}Пауза: Воркер на паузе: расписание снято/);
 
@@ -630,7 +631,7 @@ test('«Починить» after «Пауза» from the screen puts the code in
   const { world, repo, screen, press, text } = await opened();
   world.github.write(repo, FILES.worker, '// changed by hand\n');
   await press('tab', 'right', 'right', 'return');
-  assert.match(text(), /\n╭─ ВОРКЕР · GitHub Actions {3,}● на паузе\n/);
+  assert.match(text(), /\n╭╌ ВОРКЕР · GitHub Actions {3,}● на паузе\n/);
 
   await press('left', 'return', 'left');
   assert.equal(screen.busy, null);
@@ -747,7 +748,7 @@ test('a Google grant without the email scope is no broken grant: setup goes on a
   assert.match(io.output(), /\[2\/5\] Вход в Google\n.*\n {6}✓ вход выполнен\n/);
   assert.equal((await env.mac.files.readInstall())?.accounts?.google, undefined);
   let screen: Screen | undefined;
-  await env.run(async options => { screen = await openScreen(options); return 0; });
+  await env.run(async options => { screen = await openScreen(options); screen.motion = false; return 0; });
   assert.ok(screen);
   await screen.press({ name: 'tab' });
   assert.match(screen.frame().join('\n'), /\n│ Google {4}аккаунт неизвестен · вход работает {3,}войти заново\n/);
@@ -841,9 +842,9 @@ test('the frames of a switch: the caption, the steps in the journal, Esc offered
   assert.match(signed ?? '', /Переключение: Вход в ChatGPT для нового воркера: своя сессия…/);
   assert.match(signed ?? '', /Переключение: Общие правила перенесены: /);
   assert.match(signingIn ?? '', /\nОткройте https:\/\/auth\.openai\.com\/codex\/device и введите код FAKE-\d+ \(код скопирован\)\nЕсли браузер не открылся: https:\/\/auth\.openai\.com\/codex\/device\n/);
-  assert.match(frames[0]?.at(-1) ?? '', /^. Переключаем площадку… Esc — отменить$/);
+  assert.match(frames[0]?.at(-1) ?? '', /^Переключаем площадку… Esc — отменить {2}\d+:\d\d$/);
   assert.match(quenched ?? '', /Переключение: Отзываем сессию ChatGPT старого воркера…/);
-  assert.equal(frames[1]?.at(-1)?.slice(2), 'Запускаем воркер на GitHub…', 'no Esc once the quench began');
+  assert.match(frames[1]?.at(-1) ?? '', /^Запускаем воркер на GitHub… {2}\d+:\d\d$/, 'no Esc once the quench began');
 
   assert.match(text(), /\n╭─ ВОРКЕР · Google Apps Script {3,}● активен\n/);
   assert.match(text(), /\n[┃│] 12:\d\d {2}вы {2}Переключение: Воркер переключён/);
@@ -898,7 +899,7 @@ test('a paused worker is taken off pause first; ↑ from the first account goes 
   const env = await switchWorld('github');
   const { press, text } = env;
   await press('tab', 'right', 'right', 'return');
-  assert.match(text(), /\n╭─ ВОРКЕР · GitHub Actions {3,}● на паузе\n/);
+  assert.match(text(), /\n╭╌ ВОРКЕР · GitHub Actions {3,}● на паузе\n/);
   assert.match(text(), /\n┃ Проверить сейчас {3}Починить {3}Снять с паузы\n/);
   assert.doesNotMatch(text(), /Переключиться/);
   await press('up', 'up', 'up'); // the row → ChatGPT → the account of the platform, and no further
@@ -930,7 +931,7 @@ test('the section ВОРКЕР on the resets: the label on the right, the detail
   assert.ok(install);
   await mac.files.writeInstall({ ...install, paused: true });
   await screen.load();
-  assert.match(text(), /\n╭─ ВОРКЕР · GitHub Actions {3,}● на паузе\n╰─\n/);
+  assert.match(text(), /\n╭╌ ВОРКЕР · GitHub Actions {3,}● на паузе\n╰╌\n/);
 
   // An unfinished switch: the label is red, the detail says what is not finished.
   await mac.files.writeInstall({ platform: 'github', switching: { from: 'google' }, accounts: install.accounts });
@@ -974,4 +975,190 @@ test('a row of one action opens its caption by ← or → too: the cursor stays,
   assert.equal(caption(screen.frame()).startsWith('Довести переключение до конца'), true, screen.frame().join('\n'));
   await press('left');
   assert.equal(caption(screen.frame()).startsWith('Довести переключение до конца'), true, 'an open caption stays open');
+});
+
+// Issue 04: what moves on the screen, drawn from the moments the Screen keeps and the fake clock.
+// The style a painted line gives the first cell that shows mark.
+const styleOf = (painted: string, mark: string): string | null => {
+  for (const [, style, text] of painted.matchAll(/\x1b\[([0-9;]+)m([^\x1b]*)\x1b\[0m/g)) if (text?.includes(mark)) return style ?? null;
+  return null;
+};
+// The lines of the bracket of a section in a plain frame, from its heading to its corner.
+const bracket = (frame: string[], title: string): string[] => {
+  const from = frame.findIndex(line => /^[╭┏]/.test(line) && line.includes(title));
+  const to = frame.findIndex((line, i) => i > from && /^[╰┗]/.test(line));
+  return frame.slice(from, to + 1);
+};
+// The lit cells of a bracket; the row of actions under the cursor is heavy of its own.
+const lit = (lines: string[]): number => lines.filter(line => /^[┃┏┗]/.test(line) && !line.includes('Проверить сейчас')).length;
+
+test('the rule under the header counts down to the next scheduled run, and flashes when a new one comes', async () => {
+  const { world, screen, gas } = await openedOnGoogle();
+  gas.tick(); // a scheduled run
+  await screen.load();
+  screen.motion = true;
+  world.advance(150_000); // 2.5 of 5 minutes
+  assert.equal(screen.frame()[1], '━'.repeat(36) + '╸' + '─'.repeat(35));
+  assert.match(text(screen), /следующий запуск ожидается через 2 мин/, 'the detail counts from the same run');
+  world.advance(180_000);
+  assert.equal(screen.frame()[1], '━'.repeat(72), 'past the end and no new run: all heavy, no end mark');
+
+  gas.tick();
+  await screen.load();
+  assert.equal(styleOf(screen.frame(72, true)[1] ?? '', '━'), '1', 'a new run flashes the rule bold');
+  world.advance(600);
+  assert.equal(styleOf(screen.frame(72, true)[1] ?? '', '━'), null, 'the flash is over');
+  assert.match(screen.frame()[1] ?? '', /^╸─+$/, 'and the countdown starts again');
+});
+const text = (screen: Screen): string => screen.frame().join('\n');
+
+test('on GitHub the last third of the wait is dashed; a pause dashes all of it, a switch tears it', async () => {
+  const { world, screen, mac } = await opened();
+  await world.github.schedule();
+  world.advance(6 * HOUR);
+  await world.github.schedule();
+  await screen.load();
+  world.advance(3 * HOUR);
+  assert.equal(screen.frame()[1], '━'.repeat(36) + '╸' + '─'.repeat(23) + '╌'.repeat(12), 'the time on GitHub is only expected');
+
+  const install = await mac.files.readInstall();
+  assert.ok(install);
+  await mac.files.writeInstall({ ...install, paused: true });
+  await screen.load();
+  assert.equal(screen.frame()[1], '╌'.repeat(72));
+  await mac.files.writeInstall({ ...install, switching: { from: 'google' } });
+  await screen.load();
+  assert.equal(screen.frame()[1], '───── '.repeat(12));
+  await screen.press({ name: 'tab', sequence: '\t' });
+  const torn = bracket(screen.frame(), 'ВОРКЕР');
+  assert.deepEqual(torn.map(line => line.charAt(0)), ['╭', '│', '│', ' ', '│', '│', ' ', '┃', '╰'],
+    `the bracket of the worker is torn: every third line without its rail\n${torn.join('\n')}`);
+});
+
+test('the runner of a read: it eases down the journal, leaves after the answer, stops yellow without one', async () => {
+  const { world, screen, press } = await openedOnGoogle();
+  await press('tab');
+  screen.motion = true;
+  world.advance(EXIT_MS_PASSED);
+  assert.equal(lit(bracket(screen.frame(), 'ЖУРНАЛ')), 0, 'the read of Tab has answered and gone');
+
+  screen.poll = { at: world.now, answered: null, failed: false };
+  world.advance(300);
+  const flying = bracket(screen.frame(), 'ЖУРНАЛ');
+  const at = flying.findIndex(line => /^[┃┏┗]/.test(line));
+  assert.ok(at >= 0 && at < flying.length / 2, `the runner in the upper half:\n${flying.join('\n')}`);
+  screen.poll.answered = world.now;
+  world.advance(200);
+  assert.equal(lit(bracket(screen.frame(), 'ЖУРНАЛ')), 0, 'gone 200 ms after the answer');
+
+  screen.poll = { at: world.now, answered: null, failed: false };
+  world.advance(4100);
+  const painted = screen.frame(72, true).find(line => /^\x1b\[[0-9;]+m[┃┏┗]/.test(line) && !line.includes('Проверить'));
+  assert.equal(styleOf(painted ?? '', painted?.includes('┏') ? '┏' : '┃'), S_YELLOW, 'no answer in 4 s: yellow');
+  world.advance(10_000);
+  assert.ok(lit(bracket(screen.frame(), 'ЖУРНАЛ')) > 0, 'and it stands');
+  await screen.loadWorker();
+  world.advance(200);
+  assert.equal(lit(bracket(screen.frame(), 'ЖУРНАЛ')), 0, 'a new read takes it away');
+});
+const EXIT_MS_PASSED = 200, S_YELLOW = '33', S_GREEN = '32', S_CYAN = '1;36';
+
+test('an action fills the bracket of its section as it goes, goes round it without a usual time, and its outcome lights it', async () => {
+  const { world, screen, press } = await openedOnGoogle();
+  await press('tab');
+  screen.motion = true;
+  world.advance(1000);
+  const cells = bracket(screen.frame(), 'ВОРКЕР').length;
+
+  screen.busy = 'Проверяем воркер…';
+  screen.running = { at: world.now, section: 'worker', expected: 4000 };
+  world.advance(2000);
+  const half = bracket(screen.frame(), 'ВОРКЕР');
+  assert.equal(lit(half), Math.floor(cells / 2), half.join('\n'));
+  assert.ok(half[Math.floor(cells / 2)]?.startsWith('╏'), 'the cell where it is');
+  assert.equal(styleOf(screen.frame(72, true)[3] ?? '', '┏━'), S_CYAN);
+  assert.equal(screen.frame().at(-1), 'Проверяем воркер…  0:02', 'no spinner: what is done and for how long');
+  assert.ok(screen.frame().every(line => !/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/.test(line)));
+
+  screen.running = { at: world.now, section: 'worker', expected: null }; // «войти заново»
+  world.advance(250);
+  const round = bracket(screen.frame(), 'ВОРКЕР');
+  assert.deepEqual(round.slice(0, 3).map(line => line.charAt(0)), ['╭', '┃', '┃'], 'a runner, its head two cells down');
+  world.advance(100);
+  assert.deepEqual(bracket(screen.frame(), 'ВОРКЕР').slice(0, 4).map(line => line.charAt(0)), ['╭', '╏', '┃', '┃'], 'it goes on');
+  screen.busy = null;
+  screen.running = null;
+
+  await press('return'); // «Проверить сейчас» on Google answers at once
+  assert.equal(lit(bracket(screen.frame(), 'ВОРКЕР')), cells - 1, 'a good outcome lights the whole bracket');
+  assert.equal(styleOf(screen.frame(72, true)[3] ?? '', '┏━'), S_GREEN);
+  world.advance(600);
+  assert.equal(lit(bracket(screen.frame(), 'ВОРКЕР')), 0, 'for 600 ms');
+
+  screen.outcome = { at: world.now, section: 'worker', ok: false };
+  world.advance(1000);
+  assert.equal(styleOf(screen.frame(72, true)[3] ?? '', '┏━'), S_YELLOW, 'a bad one is yellow, and longer');
+  world.advance(500);
+  assert.equal(lit(bracket(screen.frame(), 'ВОРКЕР')), 0);
+});
+
+test('the dot of an active worker breathes with motion; on pause the bracket is dashed and the dot still', async () => {
+  const { world, screen, mac } = await opened();
+  const dot = () => styleOf(screen.frame(72, true).find(line => line.includes('ВОРКЕР')) ?? '', '●');
+  assert.equal(dot(), S_GREEN, 'without motion the dot stands');
+  screen.motion = true;
+  const breath = new Set<string | null>();
+  for (let i = 0; i < 4; i++) { breath.add(dot()); world.advance(1000); }
+  assert.deepEqual([...breath].sort(), ['1;32', '2;32', '32'], 'a step a second');
+
+  const install = await mac.files.readInstall();
+  assert.ok(install);
+  await mac.files.writeInstall({ ...install, paused: true });
+  await screen.load();
+  assert.match(text(screen), /\n╭╌ ВОРКЕР · GitHub Actions {3,}● на паузе\n╰╌\n/);
+  const still = dot();
+  world.advance(1000);
+  assert.equal(dot(), still);
+  assert.equal(still, S_YELLOW);
+});
+
+test('the caption unrolls line by line after its dwell and rolls back up; without motion it is there at once', async () => {
+  const { world, screen, press } = await openedOnGoogle();
+  await press('tab');
+  screen.motion = true;
+  await press('right');
+  world.advance(400);
+  assert.equal(caption(screen.frame()), '', 'the dwell has passed: only the rule is there yet');
+  assert.match(text(screen), /\n│ {20}╍{8}\n/, 'and it is not drawn yet');
+  world.advance(60);
+  assert.equal(caption(screen.frame()), 'Заново залить текущую версию воркера и вернуть расписание на этой', 'one line in 60 ms');
+  world.advance(120);
+  assert.match(text(screen), /\n│ {20}━{8}\n/, 'the rule is drawn in 180 ms');
+  world.advance(60);
+  assert.equal(caption(screen.frame()), REPAIR_CAPTION, 'all four lines in 400 + 60·4 ms');
+
+  await press('up');
+  assert.equal(caption(screen.frame()), REPAIR_CAPTION, 'closing starts from all of it');
+  world.advance(60);
+  assert.equal(screen.frame().filter(line => /^│ {3}\S/.test(line)).length, 3, 'a line goes in 60 ms, from the bottom');
+  world.advance(180);
+  assert.equal(caption(screen.frame()), '');
+  assert.doesNotMatch(text(screen), /[━╍]{8}/, 'and the rule with the last one');
+
+  screen.motion = false;
+  await press('down');
+  world.advance(400);
+  assert.equal(caption(screen.frame()), REPAIR_CAPTION, 'without motion all of it at once after the dwell');
+});
+
+test('without motion the frames do not move: no runner, no fill, no flash, no breath', async () => {
+  const { world, screen, press } = await openedOnGoogle();
+  await press('tab');
+  screen.poll = { at: world.now, answered: null, failed: false };
+  screen.outcome = { at: world.now, section: 'worker', ok: true };
+  screen.flashAt = world.now;
+  const before = screen.frame(72, true);
+  world.advance(300);
+  assert.deepEqual(screen.frame(72, true), before);
+  assert.equal(lit(bracket(screen.frame(), 'ЖУРНАЛ')) + lit(bracket(screen.frame(), 'ВОРКЕР')), 0);
 });

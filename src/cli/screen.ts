@@ -11,10 +11,12 @@ import type { Worker, OpenWorkerOptions } from './active-worker.ts';
 import type { Io, Rule, Sleep } from './common.ts';
 import { fit } from './fit.ts';
 import type { Segment } from './fit.ts';
-import { readOverview, renderOverview, overviewItems, sameItem, headerLine, paint, S, WIDTH } from './overview.ts';
+import { readOverview, renderOverview, overviewItems, sameItem, headerLine, ruleLine, countdown, lastScheduled, workerTone, lastRunFailed,
+  paint, S, WIDTH } from './overview.ts';
 import type { Overview, Tone as OverviewTone } from './overview.ts';
-import { readWorkerPage, renderWorker, itemLabel, POLL_MS, workerItems, FIRST_ACTION, journalHeight, journalWindow } from './worker-screen.ts';
-import type { WorkerPage, WorkerItem, Step } from './worker-screen.ts';
+import { readWorkerPage, renderWorker, itemLabel, POLL_MS, workerItems, FIRST_ACTION, journalHeight, journalWindow,
+  captionHeight } from './worker-screen.ts';
+import type { WorkerPage, WorkerItem, Step, Unrolled } from './worker-screen.ts';
 import { trialRun } from './setup.ts';
 import { trialLine } from './setup-google.ts';
 import type { Trial } from './setup-google.ts';
@@ -36,7 +38,6 @@ import { t, language, setLanguage } from './language.ts';
 // the journal under it is polled while it is shown. l switches the language between English
 // and Russian and keeps the choice. Takes the whole terminal on its alternate screen; q gives
 // the terminal back as it was.
-const SPINNER = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏';
 const hint = (): string => t('↑↓ select · Enter apply · Tab worker · l language · r refresh · q quit',
   '↑↓ выбор · Enter применить · Tab воркер · l язык · r обновить · q выход');
 const workerHint = (): string => t('↑↓←→ select · Enter run · Tab resets · l language · r refresh · q quit',
@@ -49,6 +50,47 @@ const TONES: Record<Tone, string> = { ok: S.green, warn: S.yellow };
 const MARGIN = '  ';
 // How long the cursor has to stand on an action before its caption opens (issue 03).
 const CAPTION_MS = 400;
+// What moves on the screen and how fast (issue 04): the rule of a caption is drawn in RULE_MS and
+// its lines come and go one in LINE_MS; a new scheduled run flashes the rule under the header for
+// FLASH_MS, an outcome lights its bracket for FLASH_MS, or WARN_MS when it needs a look. The
+// runner of a poll eases down the journal's bracket by EASE_MS, leaves it in EXIT_MS after the
+// answer and stops after STUCK_MS without one; a runner that goes round takes STEP_MS a cell.
+const RULE_MS = 180, LINE_MS = 60, FLASH_MS = 600, WARN_MS = 1500, EASE_MS = 600, EXIT_MS = 200, STUCK_MS = 4000, STEP_MS = 100;
+// The dot of an active worker breathes: a step a second.
+const BREATH = ['2;32', '32', '1;32', '32'];
+
+// The sections of a frame by the titles of their brackets: where the runners go (issue 04).
+type Section = 'resets' | 'rules' | 'worker' | 'journal';
+const TITLES: Record<Section, () => string> = { resets: () => t('RESETS', 'СБРОСЫ'), rules: () => t('RULES', 'ПРАВИЛА'),
+  worker: () => t('WORKER', 'ВОРКЕР'), journal: () => t('JOURNAL', 'ЖУРНАЛ') };
+// The cells of the bracket of a section, top to bottom: its lines from the heading to the corner.
+function bracketOf(lines: Segment[][], section: Section): number[] {
+  const title = TITLES[section]();
+  const from = lines.findIndex(line => line[0]?.[0].startsWith('╭') && line[1]?.[0] === title);
+  const to = lines.findIndex((line, i) => i > from && line[0]?.[0].startsWith('╰'));
+  return from < 0 || to < 0 ? [] : Array.from({ length: to - from + 1 }, (_, i) => from + i);
+}
+// A cell of a bracket lit: heavy (┃, ┏━ and ┗━ on the corners) or the dotted tail behind (╏).
+function light(line: Segment[] | undefined, kind: 'lit' | 'tail', style: string): void {
+  if (!line) return;
+  const text = line[0]?.[0] ?? '';
+  const mark = text.startsWith('╭') ? kind === 'lit' ? '┏━' : '╭╍' : text.startsWith('╰') ? kind === 'lit' ? '┗━' : '╰╍' :
+    kind === 'lit' ? '┃' : '╏';
+  line[0] = [mark + [...text].slice([...mark].length).join(''), style];
+}
+// A runner on a bracket: two lit cells with its head at head, a tail cell behind them.
+function runner(lines: Segment[][], cells: number[], head: number, style: string, tail: string): void {
+  const at = Math.floor(head);
+  for (const [i, kind] of [[at, 'lit'], [at - 1, 'lit'], [at - 2, 'tail']] as const) {
+    const line = cells[i];
+    if (line !== undefined) light(lines[line], kind, kind === 'lit' ? style : tail);
+  }
+}
+// «1:05» since an action started.
+const elapsed = (ms: number): string => {
+  const seconds = Math.floor(Math.max(0, ms) / 1000);
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+};
 // The same keys on the Russian layout.
 const RUSSIAN: Record<string, string> = { н: 'y', й: 'q', к: 'r', о: 'j', л: 'k', д: 'l' };
 
@@ -87,7 +129,7 @@ export class Screen {
   confirm: string | null = null; // the reset waiting for «y»
   busy: string | null = null; // what is being done
   notes: { text: string; tone: Tone | undefined }[] = []; // what the last action said
-  tick = 0;
+  said: OverviewTone | undefined = undefined; // the tone of what the action under way said last
   changed: () => void = () => {};
   options: ScreenOptions;
   view: View = 'resets';
@@ -98,7 +140,16 @@ export class Screen {
   journalOffset = 0; // how far the journal window is scrolled, in visual lines
   caption = false; // the caption of the action under the cursor is open and stays open over its neighbours
   actionAt: number | null = null; // when the cursor came on the row of actions by a key
-  captionShown = false; // the last frame drew the caption open
+  // What moves is drawn from the moments below and now (issue 04); off, the frames stand still.
+  motion = true;
+  // The caption as it unrolls from a moment on: from lines it showed then towards all of them, or
+  // back to none when it closes.
+  unroll: { item: WorkerItem; at: number; from: number; open: boolean } | null = null;
+  poll: { at: number; answered: number | null; failed: boolean } | null = null; // the last read of the screen «Воркер»
+  running: { at: number; section: Section | null; expected: number | null } | null = null; // the action under way
+  outcome: { at: number; section: Section; ok: boolean } | null = null; // how the last action ended
+  scheduledAt: number | null = null; // the latest scheduled run seen
+  flashAt: number | null = null; // when a new scheduled run was seen
   selectedLine = -1; // the line of the last frame the cursor stands on (issue 33)
   width = WIDTH; // the width of the last frame: the journal folds and scrolls to it
   steps: Step[] = []; // what the CLI did on the screen «Воркер», for its journal
@@ -125,16 +176,37 @@ export class Screen {
     const same = items.findIndex(item => sameItem(item, was));
     this.cursor = same >= 0 ? same : was?.kind === 'reset' && resets ? Math.min(this.cursor, resets - 1) :
       Math.min(this.cursor, Math.max(0, items.length - 1));
+    this.seeSchedule();
+  }
+
+  // The latest scheduled run in the journal of the screen «Воркер».
+  pageScheduled(): number | null {
+    return this.page ? lastScheduled(this.page.journal?.entries ?? []) : null;
+  }
+
+  // A scheduled run later than the latest seen flashes the rule under the header (issue 04).
+  seeSchedule(): void {
+    const at = this.model ? countdown(this.model, this.pageScheduled())?.from ?? null : null;
+    if (at === null) return;
+    if (this.scheduledAt !== null && at > this.scheduledAt) this.flashAt = this.now();
+    this.scheduledAt = Math.max(at, this.scheduledAt ?? at);
   }
 
   // Reads the screen «Воркер» again. A poll that gets no answer keeps what the last one read and says why.
   async loadWorker(): Promise<void> {
     const before = this.journalLines().length;
     const { worker, mac, now, fetch, options: { googleKeychain } } = this;
+    // The runner on the bracket of the journal is this read (issue 04).
+    const poll: NonNullable<Screen['poll']> = { at: now(), answered: null, failed: false };
+    this.poll = poll;
     try { this.page = await readWorkerPage({ worker, mac, now, fetch, googleKeychain }); } catch (error) {
+      poll.failed = true;
+      poll.answered = now();
       if (!this.page) throw error;
       this.page = { ...this.page, polledAt: this.now(), failed: explain(error) ?? t('unexpected error', 'неожиданная ошибка') };
     }
+    poll.answered ??= now();
+    this.seeSchedule();
     // The actions change with the state the page read.
     const last = workerItems(this.page).length - 1;
     this.workerCursor = Math.min(this.workerCursor, last);
@@ -170,6 +242,7 @@ export class Screen {
   // What the CLI did on this screen, as a line of its journal.
   step(text: string, tone: Step['tone'] = 'ok', at = this.now()): void {
     const before = this.journalLines().length;
+    this.said = tone;
     this.steps.push({ at, text, tone });
     this.syncJournal(before);
   }
@@ -206,10 +279,76 @@ export class Screen {
     return this.caption || this.actionAt !== null && this.now() - this.actionAt >= CAPTION_MS;
   }
 
-  // The frame has to redraw while a caption waits to open, which the terminal's interval gives.
-  captionPending(): boolean {
-    return this.view === 'worker' && !this.journal && this.workerCursor >= FIRST_ACTION &&
-      this.actionAt !== null && !this.caption && !this.captionShown;
+  // The caption as the frame draws it at the moment (issue 04): its rule drawn in RULE_MS, its
+  // lines coming one in LINE_MS — and going so when it closes. Without motion it is all there.
+  captionView(): Unrolled | null {
+    if (this.view !== 'worker' || !this.page) return null;
+    if (!this.motion) {
+      const item = this.captionOpen() ? workerItems(this.page)[this.workerCursor] : undefined;
+      return item === undefined ? null : { item, rule: 1, lines: Infinity };
+    }
+    const unroll = this.unroll, now = this.now();
+    if (!unroll || now < unroll.at) return null;
+    const steps = Math.floor((now - unroll.at) / LINE_MS);
+    if (!unroll.open) {
+      const lines = Math.max(0, unroll.from - steps);
+      return lines ? { item: unroll.item, rule: 1, lines } : null;
+    }
+    const height = captionHeight(unroll.item, this.page.platform, this.page.paused, this.width);
+    return { item: unroll.item, rule: Math.min(1, (now - unroll.at) / RULE_MS),
+      lines: unroll.from <= height ? Math.min(height, unroll.from + steps) : Math.max(height, unroll.from - steps) };
+  }
+
+  // Whether the frame changes with time alone, so the terminal redraws it: an action, a read of
+  // the worker, a flash, a caption on its way, the breathing dot — or, standing still, a caption
+  // waiting for its dwell.
+  moving(): boolean {
+    const now = this.now();
+    if (this.busy) return true;
+    if (this.view === 'worker' && this.actionAt !== null && !this.caption && now - this.actionAt <= CAPTION_MS + STEP_MS) return true;
+    if (!this.motion) return false;
+    const { unroll, poll, outcome, flashAt, page } = this;
+    if (unroll && page && now - unroll.at <= RULE_MS + LINE_MS *
+      (Math.max(unroll.from, captionHeight(unroll.item, page.platform, page.paused, this.width)) + 1)) return true;
+    if (poll && this.view === 'worker' && (poll.answered === null ? now - poll.at <= STUCK_MS + STEP_MS :
+      !poll.failed && now - poll.answered <= EXIT_MS)) return true;
+    if (outcome && now - outcome.at <= WARN_MS || flashAt !== null && now - flashAt <= FLASH_MS) return true;
+    return this.model !== null && workerTone(this.model) === 'ok';
+  }
+
+  // What moves, over the lines of a frame (issue 04): the breathing dot of an active worker, the
+  // flash of the rule under the header, the runner of a read on the bracket of the journal, an
+  // action filling the bracket of its section or going round it, and the outcome lighting it.
+  animate(lines: Segment[][], width: number): void {
+    const now = this.now(), model = this.model;
+    const heading = lines[bracketOf(lines, 'worker')[0] ?? -1];
+    const dot = heading?.findIndex(([text, style]) => text === '● ' && style === S.green) ?? -1;
+    if (heading && dot >= 0) heading[dot] = ['● ', BREATH[Math.floor(now / 1000) % BREATH.length] ?? S.green];
+    if (this.flashAt !== null && now - this.flashAt < FLASH_MS) lines[1] = [['━'.repeat(width), S.bold]];
+
+    const poll = this.poll, journal = bracketOf(lines, 'journal');
+    if (poll && journal.length) {
+      const ease = (ms: number) => journal.length * (1 - Math.exp(-ms / EASE_MS));
+      const style = model?.paused ? S.dim : model && lastRunFailed(model) ? S.yellow : S.bold;
+      if (poll.answered === null && now - poll.at <= STUCK_MS) runner(lines, journal, ease(now - poll.at), style, S.dim);
+      else if (poll.answered === null || poll.failed) {
+        runner(lines, journal, ease(Math.min(STUCK_MS, (poll.answered ?? Infinity) - poll.at)), S.yellow, S.dim);
+      } else if (now - poll.answered < EXIT_MS) {
+        const from = ease(poll.answered - poll.at);
+        runner(lines, journal, from + (journal.length + 2 - from) * (now - poll.answered) / EXIT_MS, style, S.dim);
+      }
+    }
+
+    const running = this.running, outcome = this.outcome;
+    if (this.busy && running?.section) {
+      const cells = bracketOf(lines, running.section), spent = now - running.at;
+      if (running.expected && spent < running.expected) {
+        const filled = Math.floor(cells.length * spent / running.expected);
+        cells.forEach((line, i) => { if (i <= filled) light(lines[line], i < filled ? 'lit' : 'tail', S.cyan); });
+      } else runner(lines, cells, Math.floor(spent / STEP_MS) % (cells.length + 2), S.cyan, S.cyan);
+    } else if (outcome && now - outcome.at < (outcome.ok ? FLASH_MS : WARN_MS)) {
+      for (const line of bracketOf(lines, outcome.section)) light(lines[line], 'lit', outcome.ok ? S.green : S.yellow);
+    }
   }
 
   // Lines of the frame, painted when color. fold folds the long ones under their text (issue
@@ -220,21 +359,22 @@ export class Screen {
   frame(width = WIDTH, color = false, fold = color): string[] {
     this.width = width;
     const options = { now: this.now, timeZone: this.timeZone, width, toggle: true };
-    const caption = this.captionOpen();
     let lines: Segment[][];
     if (this.view === 'worker') {
+      // The rule under the header counts down from the latest scheduled run either screen read.
+      const rule = ruleLine(this.model, { now: this.now, width, scheduledAt: this.pageScheduled() });
       lines = this.page ? renderWorker(this.page, { ...options, cursor: this.workerCursor, steps: this.steps, header: headerLine(options),
-        rows: this.windowRows(), offset: this.journalOffset, focus: this.journal, caption,
-        lastApplied: this.model?.lastApplied ?? null }) :
-        [headerLine(options), [['─'.repeat(width), S.dim]]];
+        rule, rows: this.windowRows(), offset: this.journalOffset, focus: this.journal, caption: this.captionView(),
+        lastApplied: this.model?.lastApplied ?? null, failed: this.model ? lastRunFailed(this.model) : false }) :
+        [headerLine(options), rule];
     } else if (this.model) lines = renderOverview(this.model, { ...options, cursor: this.cursor });
     else return [];
-    this.captionShown = caption;
     const body = lines.length;
     lines.push([]);
     for (const note of this.notes) lines.push([[note.text, note.tone ? TONES[note.tone] : '']]);
     if (this.notes.length) lines.push([]);
-    if (this.busy) lines.push([[`${SPINNER.charAt(this.tick % SPINNER.length)} `, S.cyan], [this.busy, '']]);
+    // What is being done and for how long; its bracket shows how far it is (issue 04).
+    if (this.busy) lines.push([[this.busy, ''], [`  ${elapsed(this.now() - (this.running?.at ?? this.now()))}`, S.dim]]);
     else if (this.confirm) {
       lines.push([[t(`Apply ${resetName(this.confirm)} now? A reset is single-use. `, `Применить ${resetName(this.confirm)} сейчас? Сброс одноразовый. `), S.bold],
         [t('y — yes, any other key — cancel', 'y — да, другая клавиша — отмена'), S.dim]]);
@@ -244,6 +384,7 @@ export class Screen {
     // view (issue 33), so its place is found as the lines fold.
     const picked = lines.slice(0, body).findIndex(([first]) =>
       (first?.[0] === '┃ ' && first[1] === S.cyan) || (first?.[0] === '╭─ ' && first[1] === S.cyan));
+    if (this.motion) this.animate(lines, width);
     this.selectedLine = -1;
     const folded: Segment[][] = [];
     const part = (from: number, to: number): Segment[][] => lines.slice(from, to).flatMap((line, i) => {
@@ -282,7 +423,7 @@ export class Screen {
         const name = resetName(creditId);
         return this.act(this.worker.platform === 'google' ? t(`Applying ${name}…`, `Применяем ${name}…`) :
           t(`Applying ${name}… The worker starts on GitHub, this takes a couple of minutes.`,
-            `Применяем ${name}… Воркер запускается на GitHub, это займёт пару минут.`), note => this.apply(creditId, note));
+            `Применяем ${name}… Воркер запускается на GitHub, это займёт пару минут.`), note => this.apply(creditId, note), { section: 'resets' });
       }
       this.changed();
       return;
@@ -302,7 +443,7 @@ export class Screen {
     else if ((name === 'down' || name === 'j') && items.length) this.cursor = (this.cursor + 1) % items.length;
     else if ((name === 'return' || name === 'space') && item?.kind === 'reset') this.confirm = item.creditId;
     else if ((name === 'return' || name === 'space') && item?.kind === 'rule') {
-      return this.act(t('Saving the rules…', 'Сохраняем правила…'), note => this.switchRule(item.rule, note));
+      return this.act(t('Saving the rules…', 'Сохраняем правила…'), note => this.switchRule(item.rule, note), { section: 'rules', expected: 3_000 });
     }
     this.changed();
   }
@@ -313,6 +454,7 @@ export class Screen {
   async switchView(): Promise<undefined> {
     this.caption = false;
     this.actionAt = null;
+    this.unroll = null;
     if (this.view === 'worker') {
       this.stopPolling();
       this.view = 'resets';
@@ -336,7 +478,7 @@ export class Screen {
     const total = this.journalLines(page).length;
     const viewport = this.windowRows() - (page.failed ? 1 : 0);
     const bottom = Math.max(0, total - viewport);
-    const was = this.workerCursor, wasOnRow = !this.journal && this.workerCursor >= FIRST_ACTION;
+    const was = this.workerCursor, wasOnRow = !this.journal && this.workerCursor >= FIRST_ACTION, shown = this.captionView();
     if (this.journal) {
       if (name === 'up' || name === 'k') {
         if (this.journalOffset > 0) this.journalOffset--;
@@ -361,10 +503,22 @@ export class Screen {
     // row of one action ← and → leave the cursor where it is, yet they start the wait too.
     const onRow = !this.journal && this.workerCursor >= FIRST_ACTION;
     const walked = wasOnRow && (name === 'left' || name === 'right') && this.actionAt === null && !this.caption;
-    if (!onRow) { this.caption = false; this.actionAt = null; }
-    else if (this.workerCursor !== was || onRow !== wasOnRow || walked) {
-      if (this.captionOpen()) this.caption = true;
-      else { this.caption = false; this.actionAt = this.now(); }
+    // It unrolls from the moment it opens; one that moves to a neighbour starts from the lines it
+    // showed, and off the row it rolls back up (issue 04).
+    const now = this.now(), chosen = items[this.workerCursor];
+    if (!onRow) {
+      this.caption = false;
+      this.actionAt = null;
+      this.unroll = shown ? { item: shown.item, at: now, from: shown.lines, open: false } : null;
+    } else if ((this.workerCursor !== was || onRow !== wasOnRow || walked) && chosen) {
+      if (this.captionOpen()) {
+        this.caption = true;
+        this.unroll = { item: chosen, at: now, from: shown?.lines ?? 0, open: true };
+      } else {
+        this.caption = false;
+        this.actionAt = now;
+        this.unroll = { item: chosen, at: now + CAPTION_MS, from: 0, open: true };
+      }
     }
     if (this.workerCursor >= FIRST_ACTION) this.actionCursor = this.workerCursor;
     this.changed();
@@ -375,6 +529,7 @@ export class Screen {
   async runItem(item: WorkerItem): Promise<undefined> {
     this.caption = false;
     this.actionAt = null;
+    this.unroll = null;
     if (item === 'switch' || item === 'retry') return this.runSwitch(item);
     const paused = this.page?.paused === true;
     const label = itemLabel(item, this.worker.platform, paused);
@@ -389,6 +544,9 @@ export class Screen {
     const action = ({ platformAccount: io => this.signInPlatform(io), chatgpt: io => this.signInChatGPT(io), trial: io => this.trial(io),
       repair: io => this.repair(io), pause: () => this.setPause(!paused) } satisfies
       Record<Exclude<WorkerItem, 'switch' | 'retry'>, (io: Io) => Promise<string>>)[item];
+    // How long an action usually takes, for its bracket to fill; the sign-ins have no such time.
+    const expected = ({ trial: this.worker.platform === 'google' ? 4_000 : 60_000, repair: 15_000, pause: 3_000 } as
+      Partial<Record<WorkerItem, number>>)[item] ?? null;
     return this.act(busy, async note => {
       // The lines of the commands are notes while it runs: device codes, what it waits for.
       const io: Io = { print: line => note(line), prompt: async () => { throw new Error('the screen asks no questions'); },
@@ -402,7 +560,7 @@ export class Screen {
       }
       this.notes = [];
       this.step(`${label}: ${text}`, tone);
-    });
+    }, { section: 'worker', expected });
   }
 
   // «Переключиться на …» and «Повторить переключение» (ADR-0007): each step of the switch goes
@@ -453,7 +611,7 @@ export class Screen {
           this.worker = await this.options.reopen();
           this.workerCursor = this.actionCursor = FIRST_ACTION;
         }
-      });
+      }, { section: 'worker' });
     } finally { this.stopSwitch = null; }
     if (moved && this.view === 'worker') this.startPolling();
   }
@@ -515,12 +673,17 @@ export class Screen {
     return email ? t(`Signed in to Google as ${email}.`, `Вы вошли в Google как ${email}.`) : t('Signed in to Google.', 'Вы вошли в Google.');
   }
 
-  // Runs an action, shows what it says and reads the overview again.
-  async act(label: string, action: (note: Note) => Promise<void>): Promise<undefined> {
+  // Runs an action, shows what it says and reads the overview again. section is where it shows
+  // how far it is, expected how long it usually takes (issue 04); how it ended lights the section.
+  async act(label: string, action: (note: Note) => Promise<void>,
+    { section = null, expected = null }: { section?: Section | null; expected?: number | null } = {}): Promise<undefined> {
     this.busy = label;
+    this.running = { at: this.now(), section, expected };
+    this.said = undefined;
     this.changed();
     const note: Note = (text, tone) => {
       this.notes.push(...text.split('\n').map(line => ({ text: line, tone })));
+      this.said = tone ?? 'ok';
       this.changed();
     };
     const tell = (error: unknown) => {
@@ -533,6 +696,8 @@ export class Screen {
       try { await (this.view === 'worker' ? this.loadWorker() : this.load()); } catch (error) { tell(error); }
     } finally {
       this.busy = null;
+      this.running = null;
+      if (section) this.outcome = { at: this.now(), section, ok: this.said !== 'warn' && this.said !== 'bad' };
       this.changed();
     }
   }
@@ -621,7 +786,9 @@ export interface Terminal {
     on?(event: 'resize', listener: () => void): unknown; off?(event: 'resize', listener: () => void): unknown };
 }
 type Shown = { line: string; row: number; rows: number };
-export function runScreen(screen: Screen, { input, output }: Terminal): Promise<number> {
+// env turns the motion off: AURES_MOTION=off, or NO_COLOR as any colour (issue 04).
+export function runScreen(screen: Screen, { input, output }: Terminal, env: Record<string, string | undefined> = process.env): Promise<number> {
+  screen.motion = env.AURES_MOTION !== 'off' && !env.NO_COLOR;
   let done = false, shown: Shown[] = [], bottom = 1; // the lines on the terminal with their rows, the row under them
   let offset = 0; // where the middle of a frame taller than the terminal starts (issue 33)
   const draw = (full = false) => {
@@ -653,13 +820,12 @@ export function runScreen(screen: Screen, { input, output }: Terminal): Promise<
     if (text) output.write(`\x1b[?2026h${text}\x1b[?2026l`);
   };
   const redraw = () => draw(true);
-  // The spinner turns while an action runs; the clock and the time left move every half minute,
-  // and a caption waiting to open redraws the frame when its dwell passes (issue 03).
+  // While something moves the frame is drawn ten times a second (issue 04); standing still, the
+  // clock and the time left move every half minute.
   let ticks = 0;
   const spin = setInterval(() => {
     ticks++;
-    if (screen.busy) screen.tick++;
-    if (screen.busy || screen.captionPending() || ticks % 300 === 0) draw();
+    if (screen.moving() || ticks % 300 === 0) draw();
   }, 100);
   emitKeypressEvents(input);
   const raw = input.isRaw;

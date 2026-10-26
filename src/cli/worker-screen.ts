@@ -11,7 +11,7 @@ import type { Worker } from './active-worker.ts';
 import type { Mac } from './mac-check.ts';
 import { resetName, reasonText } from './common.ts';
 import { otherPlatform, platformName } from './switch.ts';
-import { shortTime, S, WIDTH } from './overview.ts';
+import { shortTime, railed, S, WIDTH } from './overview.ts';
 import type { Segment, Tone } from './overview.ts';
 import type { Summary } from '../worker/summary.ts';
 import { fit } from './fit.ts';
@@ -159,12 +159,20 @@ function captionLines(text: string, width: number): Segment[][] {
   }, []));
 }
 
+// How many lines the text of a caption takes at a width of the screen: the caption unrolls line
+// by line up to it (issue 04).
+export const captionHeight = (item: WorkerItem, platform: Platform, paused: boolean, width = WIDTH): number =>
+  item === 'platformAccount' || item === 'chatgpt' ? 0 : captionLines(itemCaption(item, platform, paused), width - 4).length;
+
 // The worker in the heading of its section: the label beside the dot on the right, the detail as
-// the first line of the section when the state has one (issue 03).
-function pageState({ paused, switching }: Pick<WorkerPage, 'paused' | 'switching'>): { tone: Tone; label: string; detail: string | null } {
+// the first line of the section when the state has one (issue 03). failed: the overview says the
+// last run failed (issue 04).
+function pageState({ paused, switching }: Pick<WorkerPage, 'paused' | 'switching'>, failed: boolean):
+  { tone: Tone; label: string; detail: string | null } {
   if (switching) return { tone: 'bad', label: t('no active worker', 'нет активного воркера'),
     detail: t('the switch is not finished', 'переключение не завершено') };
   if (paused) return { tone: 'warn', label: t('paused', 'на паузе'), detail: null };
+  if (failed) return { tone: 'bad', label: t('last run failed', 'ошибка запуска'), detail: null };
   return { tone: 'ok', label: t('active', 'активен'), detail: null };
 }
 
@@ -313,15 +321,19 @@ export function journalWindow(page: WorkerPage, steps: Step[], { timeZone, width
     width - 2));
 }
 
-// header is the top line, the same as on the overview. rows is the height of the journal window
-// (journalHeight), offset how far it is scrolled in visual lines, focus whether the cursor stands
-// in the journal, caption whether the caption of the action under the cursor is open, lastApplied
-// the application the summary names for the journal. now tells today, for the time of a run.
+// header is the top line, the same as on the overview, rule the line under it (ruleLine). rows is
+// the height of the journal window (journalHeight), offset how far it is scrolled in visual lines,
+// focus whether the cursor stands in the journal, caption whether the caption of the action under
+// the cursor is open, lastApplied the application the summary names for the journal, failed
+// whether the overview says the last run failed. now tells today, for the time of a run. A caption
+// that unrolls (issue 04) names its item, the part of its rule drawn (0–1) and its lines shown.
+export interface Unrolled { item: WorkerItem; rule: number; lines: number }
 export interface WorkerRenderOptions { timeZone?: string; width?: number; cursor: number; steps: Step[]; header: Segment[];
-  now: () => number; rows: number; offset?: number; focus?: boolean; caption?: boolean; lastApplied?: Summary['lastApplied'] }
-export function renderWorker(page: WorkerPage, { timeZone, width = WIDTH, cursor, steps, header, now, rows, offset = 0,
-  focus = false, caption = false, lastApplied = null }: WorkerRenderOptions): Segment[][] {
-  const lines: Segment[][] = [header, [['─'.repeat(width), S.dim]], []];
+  rule?: Segment[]; now: () => number; rows: number; offset?: number; focus?: boolean; caption?: boolean | Unrolled | null;
+  lastApplied?: Summary['lastApplied']; failed?: boolean }
+export function renderWorker(page: WorkerPage, { timeZone, width = WIDTH, cursor, steps, header, rule = [['─'.repeat(width), S.dim]], now,
+  rows, offset = 0, focus = false, caption = false, lastApplied = null, failed = false }: WorkerRenderOptions): Segment[][] {
+  const lines: Segment[][] = [header, rule, []];
   const items = workerItems(page);
   const selected = (item: WorkerItem) => items[cursor] === item;
   // With the cursor in the journal neither the accounts nor the row of actions point anywhere.
@@ -330,7 +342,7 @@ export function renderWorker(page: WorkerPage, { timeZone, width = WIDTH, cursor
 
   // The section «ВОРКЕР»: the state on the right of the heading, the link, the accounts and the
   // actions in one row, the caption of the action under the cursor, all in one bracket.
-  const state = pageState(page);
+  const state = pageState(page, failed), heading = lines.length;
   lines.push(spread([['╭─ ', S.dim], [t('WORKER', 'ВОРКЕР'), S.bold], [` · ${platformName(page.platform)}`, S.dim]],
     [['● ', TONES[state.tone]], [state.label, TONES[state.tone]]], width));
   if (state.detail) lines.push([rail(), [state.detail, TONES[state.tone]]]);
@@ -368,15 +380,20 @@ export function renderWorker(page: WorkerPage, { timeZone, width = WIDTH, cursor
   lines.push([rail(!focus && cursor >= FIRST_ACTION), ...row]);
 
   // The caption of the action under the cursor, when it is open: a rule under its label, then
-  // what it does and the details of that, folded to the width. The journal moves under it.
-  const item = items[cursor];
-  if (caption && !focus && item !== undefined && item !== 'platformAccount' && item !== 'chatgpt') {
-    const at = cursor - FIRST_ACTION, label = labels[at] ?? '';
-    lines.push([rail(), [' '.repeat(Math.max(0, (starts[at] ?? 2) - 2)), ''], ['━'.repeat(len(label)), S.cyan]]);
-    for (const line of captionLines(itemCaption(item, page.platform, page.paused), width - 4))
+  // what it does and the details of that, folded to the width. The journal moves under it. One
+  // that unrolls draws its rule so far, the rest dashed, and the lines it has come to.
+  const unrolled: Unrolled | null = typeof caption === 'object' ? caption :
+    caption && !focus && items[cursor] !== undefined ? { item: items[cursor], rule: 1, lines: Infinity } : null;
+  const item = unrolled?.item;
+  if (unrolled && item !== undefined && item !== 'platformAccount' && item !== 'chatgpt' && items.includes(item)) {
+    const at = items.indexOf(item) - FIRST_ACTION, label = labels[at] ?? '', drawn = Math.round(len(label) * unrolled.rule);
+    lines.push([rail(), [' '.repeat(Math.max(0, (starts[at] ?? 2) - 2)), ''], ['━'.repeat(drawn), S.cyan], ['╍'.repeat(len(label) - drawn), S.dim]]);
+    for (const line of captionLines(itemCaption(item, page.platform, page.paused), width - 4).slice(0, unrolled.lines))
       lines.push([rail(), ['  ', ''], ...line]);
   }
-  lines.push([['╰─', S.dim]], []);
+  lines.push([['╰─', S.dim]]);
+  railed(lines, heading, page.switching ? 'broken' : page.paused ? 'dashed' : 'solid');
+  lines.push([]);
 
   // The section «ЖУРНАЛ»: the poll on the right of its heading, its window on the rail — the
   // rail is the scroll bar, heavy where the window stands on its lines, cyan in the focus. A
