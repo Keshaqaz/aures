@@ -170,8 +170,8 @@ function pageState({ paused, switching }: Pick<WorkerPage, 'paused' | 'switching
 
 // «1 проверка, 3 проверки, 5 проверок, 21 проверка» — the Russian word by the count.
 const checksWord = (n: number): string => {
-  const ones = n % 10, hundreds = n % 100;
-  return hundreds >= 5 && hundreds <= 20 || ones > 4 || ones === 0 ? 'проверок' : ones === 1 ? 'проверка' : 'проверки';
+  const ones = n % 10, lastTwo = n % 100;
+  return lastTwo >= 5 && lastTwo <= 20 || ones > 4 || ones === 0 ? 'проверок' : ones === 1 ? 'проверка' : 'проверки';
 };
 const checks = (n: number): string => t(`${n} ${n === 1 ? 'check' : 'checks'}`, `${n} ${checksWord(n)}`);
 

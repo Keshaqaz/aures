@@ -357,10 +357,12 @@ export class Screen {
         (this.workerCursor - FIRST_ACTION + (name === 'left' ? actions - 1 : 1)) % actions;
     } else if ((name === 'return' || name === 'space') && item) return this.runItem(item);
     // The caption of an action opens after the cursor has stood on it 400 ms; a key that walks
-    // the row restarts the wait, an open one moves to the neighbour without it (issue 03).
+    // the row restarts the wait, an open one moves to the neighbour without it (issue 03). In a
+    // row of one action ← and → leave the cursor where it is, yet they start the wait too.
     const onRow = !this.journal && this.workerCursor >= FIRST_ACTION;
+    const walked = wasOnRow && (name === 'left' || name === 'right') && this.actionAt === null && !this.caption;
     if (!onRow) { this.caption = false; this.actionAt = null; }
-    else if (this.workerCursor !== was || onRow !== wasOnRow) {
+    else if (this.workerCursor !== was || onRow !== wasOnRow || walked) {
       if (this.captionOpen()) this.caption = true;
       else { this.caption = false; this.actionAt = this.now(); }
     }

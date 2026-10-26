@@ -961,3 +961,17 @@ test('the caption of an action does not open by itself with the screen or after 
   world.advance(400);
   assert.equal(caption(screen.frame()).startsWith('Заново залить'), true, 'and after 400 ms it opens');
 });
+
+test('a row of one action opens its caption by ← or → too: the cursor stays, the dwell starts', async () => {
+  const { world, screen, press, mac } = await opened();
+  const install = await mac.files.readInstall();
+  assert.ok(install);
+  await mac.files.writeInstall({ ...install, switching: { from: 'google' } });
+  await press('tab');
+  assert.equal(caption(screen.frame()), '', 'not with the screen');
+  await press('right');
+  world.advance(400);
+  assert.equal(caption(screen.frame()).startsWith('Довести переключение до конца'), true, screen.frame().join('\n'));
+  await press('left');
+  assert.equal(caption(screen.frame()).startsWith('Довести переключение до конца'), true, 'an open caption stays open');
+});
