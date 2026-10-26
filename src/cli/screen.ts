@@ -312,7 +312,7 @@ export class Screen {
       (Math.max(unroll.from, captionHeight(unroll.item, page.platform, page.paused, this.width)) + 1)) return true;
     if (poll && this.view === 'worker' && (poll.answered === null ? now - poll.at <= STUCK_MS + STEP_MS :
       !poll.failed && now - poll.answered <= EXIT_MS)) return true;
-    if (outcome && now - outcome.at <= WARN_MS || flashAt !== null && now - flashAt <= FLASH_MS) return true;
+    if (outcome && now - outcome.at <= (outcome.ok ? FLASH_MS : WARN_MS) || flashAt !== null && now - flashAt <= FLASH_MS) return true;
     return this.model !== null && workerTone(this.model) === 'ok';
   }
 
