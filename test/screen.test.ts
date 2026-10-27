@@ -704,6 +704,14 @@ test('the section ВОРКЕР on the resets: the label on the right, the detail
   assert.ok(io.output().endsWith(`\n╭─ ВОРКЕР · Google Apps Script${' '.repeat(33)}● активен\n│ ждёт запуска по расписанию\n` +
     `│ https://script.google.com/home/projects/${project.scriptId}\n╰─`), 'status keeps the link as the last line of the section');
 
+  // Two hours since setup and no scheduled run in the journal at all (issue 04): the schedule
+  // has never fired, and the before-expiry rule with it.
+  world.advance(2 * HOUR);
+  const { io: silent } = await run(status);
+  assert.match(silent.output(), /\n╭─ ВОРКЕР · Google Apps Script {3,}● нет запусков по расписанию\n│ уже 2 ч\n/);
+  assert.equal(silent.lines.at(-1), `! Google ни разу не запускал воркер по расписанию с установки (2 ч), а правило перед истечением ` +
+    `зависит от этих запусков. Проверьте: https://script.google.com/home/projects/${project.scriptId}/executions`);
+
   // A pause: the label says it, the section has no detail line.
   const install = await mac.files.readInstall();
   assert.ok(install);
@@ -717,7 +725,7 @@ test('the section ВОРКЕР on the resets: the label on the right, the detail
   world.advance(HOUR);
   assert.throws(() => gas.tick(), 'the tick throws, so that Google mails the user');
   await screen.load();
-  assert.match(text(), /\n╭─ ВОРКЕР · Google Apps Script {3,}● ошибка запуска\n│ последний запуск с ошибкой · 20 окт 13:00\n╰─\n/);
+  assert.match(text(), /\n╭─ ВОРКЕР · Google Apps Script {3,}● ошибка запуска\n│ последний запуск с ошибкой · 20 окт 15:00\n╰─\n/);
 });
 
 // A reset inside the last hour before its deadline is marked «скоро применится» only when the

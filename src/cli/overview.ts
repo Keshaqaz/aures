@@ -110,6 +110,9 @@ export const lastScheduled = (journal: { kind: string; at: string }[]): number |
   const found = journal.findLast(entry => entry.kind === 'scheduled');
   return found ? Date.parse(found.at) : null;
 };
+// Since when the journal shows no scheduled run: the latest one, or with none the oldest run it holds.
+const quietSince = (journal: { kind: string; at: string }[]): number | null =>
+  lastScheduled(journal) ?? (journal[0] ? Date.parse(journal[0].at) : null);
 
 // From the last scheduled run to the next one expected, the same data as the detail of the
 // section «ВОРКЕР» says (issue 04). scheduledAt is a later scheduled run the screen «Воркер» read
@@ -160,7 +163,8 @@ export interface MarkedEntry { at: string; kind: string; outcome: RunOutcome | n
 // What the worker is by the pause, the schedule and its journal, as of the read (CONTEXT.md,
 // «Активный воркер»): one place decides the label beside the dot and its tone, for the overview
 // and for the screen «Воркер» alike. silent: the schedule is on, but no scheduled run for over
-// the before-expiry window.
+// the before-expiry window, or none in the journal at all while its oldest run is older than it
+// (Google never ran the trigger after setup; 30 manual runs in a row read the same way).
 export type WorkerMark = 'paused' | 'no_schedule' | 'not_run' | 'failed' | 'silent' | 'active';
 export function workerMark({ paused, schedule, journal, readAt }: { paused: boolean; schedule: boolean;
   journal: MarkedEntry[]; readAt: number }): WorkerMark {
@@ -169,8 +173,8 @@ export function workerMark({ paused, schedule, journal, readAt }: { paused: bool
   const last = journal.at(-1);
   if (!last) return 'not_run';
   if (last.outcome !== null && USER_MENDS.includes(last.outcome)) return 'failed';
-  const scheduledAt = lastScheduled(journal);
-  return scheduledAt !== null && readAt - scheduledAt > BEFORE_EXPIRY_MS ? 'silent' : 'active';
+  const since = quietSince(journal);
+  return since !== null && readAt - since > BEFORE_EXPIRY_MS ? 'silent' : 'active';
 }
 
 // The label of the worker in its section and the tone of its dot, by its mark.
@@ -200,10 +204,14 @@ function googleState({ scriptId, schedule, journal }: WorkerView, readAt: number
     return { ...workerLabel(mark), detail: t(`last run failed · ${at}`, `последний запуск с ошибкой · ${at}`) };
   }
   if (mark === 'silent') {
-    const silent = Math.floor((readAt - (lastScheduled(journal) ?? readAt)) / 3600_000);
+    const scheduledAt = lastScheduled(journal);
+    const silent = Math.floor((readAt - (quietSince(journal) ?? readAt)) / 3600_000);
     return { ...workerLabel(mark), detail: t(`none for ${silent}h`, `уже ${silent} ч`),
-      warning: t(`Google has not run the worker on schedule for ${silent}h, and the before-expiry rule depends on it. Check: ${executions(scriptId)}`,
-        `Google не запускал воркер по расписанию уже ${silent} ч, а правило перед истечением зависит от этих запусков. Проверьте: ${executions(scriptId)}`) };
+      warning: scheduledAt === null
+        ? t(`Google has not run the worker on schedule since setup (${silent}h), and the before-expiry rule depends on it. Check: ${executions(scriptId)}`,
+          `Google ни разу не запускал воркер по расписанию с установки (${silent} ч), а правило перед истечением зависит от этих запусков. Проверьте: ${executions(scriptId)}`)
+        : t(`Google has not run the worker on schedule for ${silent}h, and the before-expiry rule depends on it. Check: ${executions(scriptId)}`,
+          `Google не запускал воркер по расписанию уже ${silent} ч, а правило перед истечением зависит от этих запусков. Проверьте: ${executions(scriptId)}`) };
   }
   if (mark === 'not_run') return workerLabel(mark);
   const scheduledAt = lastScheduled(journal);

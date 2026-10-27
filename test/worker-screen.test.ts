@@ -79,6 +79,22 @@ test('the state of the worker: no schedule in red, no scheduled run in yellow, t
     [['● ', S.yellow], ['на паузе', S.yellow]], 'the pause comes first');
 });
 
+// A journal of the runs of setup alone holds no scheduled run (issue 04): younger than the
+// before-expiry window the worker still waits for its first scheduled run, older than it the
+// schedule has never fired. A fresh scheduled run ends the waiting over old setup runs.
+test('the state of the worker with no scheduled run in the journal at all', () => {
+  const state = (entries: JournalEntry[]): (Segment | undefined)[] => {
+    const heading = render(page({ journal: { schedule: true, entries, readAt: NOW, responseMs: 400 } }))[3] ?? [];
+    return [heading.at(-2), heading.at(-1)];
+  };
+  assert.deepEqual(state([run('11:00', 'login', 'idle'), run('11:00', 'trial', 'idle')]),
+    [['● ', S.yellow], ['нет запусков по расписанию', S.yellow]], 'setup runs alone, older than the window');
+  assert.deepEqual(state([run('12:30', 'login', 'idle'), run('12:35', 'trial', 'idle')]),
+    [['● ', S.green], ['активен', S.green]], 'younger than the window: the first run is still due');
+  assert.deepEqual(state([run('11:00', 'login', 'idle'), run('12:41', 'scheduled', 'idle')]),
+    [['● ', S.green], ['активен', S.green]], 'a fresh scheduled run over old setup ones');
+});
+
 test('in English the same frame', () => {
   setLanguage('en');
   try {

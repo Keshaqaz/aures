@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fit, foldText } from '../src/cli/fit.ts';
+import { fit, fitOnRail, foldText } from '../src/cli/fit.ts';
 import type { Segment } from '../src/cli/fit.ts';
+import { renderOverview } from '../src/cli/overview.ts';
+import type { Overview } from '../src/cli/overview.ts';
+import { setLanguage } from '../src/cli/language.ts';
 
 const text = (rows: Segment[][]): string[] => rows.map(row => row.map(([part]) => part).join(''));
 
@@ -43,4 +46,33 @@ test('a scrap at the end (the unit of a duration) stays with the word before it'
 test('a hint folds after a «·», keeping each key with its word', () => {
   assert.deepEqual(foldText('↑↓ select · Enter run · Tab resets · l language · r refresh · q quit', 52),
     ['↑↓ select · Enter run · Tab resets · l language ·', 'r refresh · q quit']);
+});
+
+// The worker Google has never run on schedule (issue 04): its label on the heading of the
+// section and the detail under it need no fold, and the warning under them folds, both in the
+// width of the screen and in both languages.
+test('the mark of a never-scheduled worker and its warning fit the width in both languages', () => {
+  const readAt = Date.parse('2026-10-20T12:42:00.000Z');
+  const model: Overview = { worker: { platform: 'google', scriptId: '1saDvTvdkGxbE8lZW7Qi37qq', schedule: true,
+    journal: [{ at: '2026-10-20T10:40:00.000Z', kind: 'login', outcome: 'idle', durationMs: 200 },
+      { at: '2026-10-20T10:41:00.000Z', kind: 'trial', outcome: 'idle', durationMs: 300 }] },
+    readAt, resets: [], rules: null, paused: false, lastApplied: null, lastAttempt: null };
+  const plain = (line: Segment[]): string => line.map(([text]) => text).join('');
+  try {
+    for (const code of ['en', 'ru'] as const) {
+      setLanguage(code);
+      const lines = renderOverview(model, { now: () => readAt, timeZone: 'UTC' }).map(plain);
+      const heading = lines.findIndex(line => line.includes(code === 'ru' ? 'ВОРКЕР' : 'WORKER'));
+      assert.match(lines[heading] ?? '', code === 'ru' ? /● нет запусков по расписанию$/ : /● no scheduled run$/);
+      assert.ok([...lines[heading] ?? ''].length <= 72, 'the label fits the heading without a fold');
+      assert.match(lines[heading + 1] ?? '', code === 'ru' ? /уже 2 ч$/ : /none for 2h$/);
+      assert.ok([...lines[heading + 1] ?? ''].length <= 72, 'the detail fits its line without a fold');
+      const warning = lines.at(-1) ?? '';
+      assert.ok(warning.startsWith('! '), 'the warning stands under the sections');
+      for (const row of fitOnRail([['! ', ''], [warning.slice(2), '']], 72)) {
+        const text = plain(row);
+        assert.ok([...text].length <= 72, `${code}: ${text}`);
+      }
+    }
+  } finally { setLanguage('en'); }
 });
