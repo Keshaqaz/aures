@@ -7,7 +7,7 @@ import type { GoogleApi } from '../google/api.ts';
 import { PROJECT_TITLE, PROJECT_FILES, SCRIPT_HOME, secretOf } from '../apps-script/layout.ts';
 import { CommandFailed, unfinished, notInstalled } from './common.ts';
 import type { CommandOptions, Printer } from './common.ts';
-import { connectGoogle, askWorker, workerDid, readSecret } from './google.ts';
+import { connectGoogle, askWorker, workerDid } from './google.ts';
 import type { WorkerReply } from './google.ts';
 import { KeychainUnavailable } from './keychain.ts';
 import { RULES_FORMAT_VERSION } from '../worker/state-file.ts';
@@ -49,10 +49,15 @@ export async function openWorker(options: OpenWorkerOptions, command: string | n
 const notAnswering = (why: string): CommandFailed => new CommandFailed(t(`The worker on Google does not answer: ${why}. ` +
   'Repair it: `aures setup` deploys it again.', `Воркер на Google не отвечает: ${why}. Почините его: \`aures setup\` заново зальёт воркер.`));
 
-// The worker as the record has it, if it answers to the secret of this Mac.
+// The worker as the record has it, if it answers to the secret of this Mac. A locked Keychain is
+// not a missing secret: it says so, without the advice to repair a worker that is not broken.
 async function openGoogle({ fetch, secretKeychain }: OpenWorkerOptions, scriptId: string, url: string, command: string | null):
   Promise<Worker> {
-  const secret = await readSecret(secretKeychain);
+  let secret: string | null;
+  try { secret = await secretKeychain.read(); } catch (error) {
+    if (!(error instanceof KeychainUnavailable)) throw error;
+    throw new CommandFailed(t('The Keychain is locked: unlock it and try again.', 'Связка ключей заблокирована: разблокируйте её и повторите.'));
+  }
   if (!secret) throw notAnswering(t('there is no worker secret in the Keychain of this Mac', 'в Связке ключей этого Mac нет секрета воркера'));
   let status: WorkerReply | null;
   try { status = await askWorker({ fetch, url, secret }, 'status'); } catch (error) {
@@ -79,9 +84,16 @@ async function findWorker(options: OpenWorkerOptions): Promise<Install> {
 
 // The project from the link the user pastes: the Apps Script API lists no projects, and Drive
 // would take a restricted scope. The deployment and the doPost secret are read from the project.
+// The record this finds writes keeps the email of the sign-in that found it, as setup's does:
+// connectGoogle is given the files of the install, which do not exist yet, so the email is
+// caught and written with the record.
 async function findGoogle({ fetch, googleKeychain, secretKeychain, io, open, mac: { files }, now = Date.now }: OpenWorkerOptions):
   Promise<Install> {
-  const api = await connectGoogle({ fetch, keychain: googleKeychain, io, open, now });
+  let email: string | null = null;
+  const api = await connectGoogle({ fetch, keychain: googleKeychain, io, open, now, files: {
+    rememberAccount: async (_account, signed) => { email ??= signed; },
+  } });
+  const accounts = email ? { accounts: { google: email } } : {};
   io.print(t(`Open the project ${PROJECT_TITLE} on ${SCRIPT_HOME} and paste the link from the address bar.`,
     `Откройте проект ${PROJECT_TITLE} на ${SCRIPT_HOME} и вставьте ссылку из адресной строки.`));
   await open(SCRIPT_HOME);
@@ -93,7 +105,7 @@ async function findGoogle({ fetch, googleKeychain, secretKeychain, io, open, mac
   const [deployment] = deployments;
   if (!secret || !deployment) {
     // setup goes on in this project.
-    await files.writeInstall({ platform: 'google', google: { scriptId } });
+    await files.writeInstall({ platform: 'google', google: { scriptId }, ...accounts });
     throw new CommandFailed(unfinished());
   }
   try { await secretKeychain.write(secret); } catch (error) {
@@ -101,7 +113,7 @@ async function findGoogle({ fetch, googleKeychain, secretKeychain, io, open, mac
     throw new CommandFailed(t('Could not save the worker secret to the Keychain. Unlock it and try again.',
       'Не удалось сохранить секрет воркера в Связку ключей. Разблокируйте её и повторите.'));
   }
-  const install: Install = { platform: 'google', google: { scriptId, ...deployment } };
+  const install: Install = { platform: 'google', google: { scriptId, ...deployment }, ...accounts };
   await files.writeInstall(install);
   io.print(t(`The worker is found: ${deployment.url}`, `Воркер найден: ${deployment.url}`));
   return install;

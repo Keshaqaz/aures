@@ -1,6 +1,7 @@
 import { setupGoogle } from './setup-google.ts';
-import { Stages, command, capitalized, githubRepoStep } from './common.ts';
+import { Stages, CommandFailed, command, capitalized, githubRepoStep } from './common.ts';
 import type { CommandOptions } from './common.ts';
+import { KeychainUnavailable } from './keychain.ts';
 import { t } from './language.ts';
 
 // `aures setup`: from nothing to a working worker, or the missing parts of an existing one,
@@ -16,8 +17,16 @@ export interface SetupOptions extends CommandOptions {
   openScreen?: () => Promise<number>;
 }
 export async function setup(options: SetupOptions): Promise<number> {
-  const { io, mac, now = Date.now, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)) } = options;
+  const { io, mac, secretKeychain, now = Date.now, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)) } = options;
   const code = await command('setup', io, async () => {
+    // A locked Keychain reads as no secret at all (readSecret): setup would find no worker,
+    // deploy a new one under a secret nobody has and fail to save it. The secret is read
+    // directly, before anything is touched.
+    try { await secretKeychain.read(); } catch (error) {
+      if (!(error instanceof KeychainUnavailable)) throw error;
+      throw new CommandFailed(t('Could not read the worker secret from the Keychain. Unlock it and try again.',
+        'Не удалось прочитать секрет воркера из Связки ключей. Разблокируйте её и повторите.'));
+    }
     // The worker of the removed GitHub platform (ADR-0009) keeps running while its repository is
     // there: the user learns it here, before the record of that version is overwritten.
     if (await mac.files.githubInstall()) io.print(capitalized(githubRepoStep()));

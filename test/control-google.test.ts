@@ -11,10 +11,18 @@ import { credit } from './support/fake-world.ts';
 import { cliWorld } from './support/cli-world.ts';
 import { SCRIPT_HOME } from './support/fake-google.ts';
 import type { FakeProject } from './support/fake-google.ts';
+import { KeychainUnavailable } from '../src/cli/keychain.ts';
+import type { Keychain } from '../src/cli/keychain.ts';
 import { workerDid } from '../src/cli/google.ts';
 
 const HOUR = 3600_000, MINUTE = 60_000;
 const GOOGLE_LOGIN = 'https://accounts.google.com/';
+// A Keychain that does not answer, as a locked one.
+const lockedKeychain = (): Keychain => ({
+  read: async () => { throw new KeychainUnavailable(); },
+  write: async () => {},
+  remove: async () => {},
+});
 
 // A worker installed on Google by setup with the default rules (both on, issue 24): resets
 // reset-a (in 5 days) and reset-b (in 2 days 3 hours).
@@ -111,7 +119,7 @@ test('apply-now on Google with a lost worker session spends nothing and asks for
   assert.equal(world.consumeCalls().length, 0);
 });
 
-test('a link of another signed-in Google account finds the project too', async () => {
+test('a link of another signed-in Google account finds the project too, and the record keeps the email of the sign-in', async () => {
   const { mac, keychain, project, run } = await installed();
   // Another Mac knows the emails of the accounts only from its own sign-ins.
   const { accounts: _accounts, ...install } = await mac.files.readInstall() ?? {};
@@ -119,7 +127,7 @@ test('a link of another signed-in Google account finds the project too', async (
   keychain.entries.clear();
   const { code, io } = await run(status, { answers: [`https://script.google.com/u/1/home/projects/${project.scriptId}/edit`] });
   assert.equal(code, 0, io.output());
-  assert.deepEqual(await mac.files.readInstall(), install);
+  assert.deepEqual(await mac.files.readInstall(), { ...install, accounts: { google: 'owner@example.invalid' } });
 });
 
 test('rules on Google switch a rule in the worker and leave this Mac as it is', async () => {
@@ -155,7 +163,8 @@ test('a Mac without the install record finds the worker on Google by the link to
   assert.ok(world.google.opened.includes(SCRIPT_HOME));
   assert.ok(world.google.opened.some(href => href.startsWith(GOOGLE_LOGIN)));
   assert.match(io.output(), /Воркер найден: https:\/\/script\.google\.com\/macros\/s\/.*\/exec/);
-  assert.deepEqual(await mac.files.readInstall(), install);
+  assert.deepEqual(await mac.files.readInstall(), { ...install, accounts: { google: 'owner@example.invalid' } },
+    'the email of the sign-in that found the worker lands in the record');
   assert.equal(await keychain.entries.get('worker-secret'), world.google.deployedSecret(project));
   assert.ok(/СБРОСЫ · 2/.test(io.output()), io.output());
 
@@ -260,4 +269,13 @@ test('the screen on Google applies a reset and switches a rule through the worke
 test('a worker script that failed is told with its message, not as a script without access', () => {
   assert.throws(() => workerDid({ ok: false, error: 'internal', message: 'Service invoked too many times: properties' }, 'status'),
     { message: 'Скрипт воркера упал: Service invoked too many times: properties. Повторите `aures status`.' });
+});
+
+// A locked Keychain reads as no secret at all through readSecret; the worker commands tell the
+// difference, instead of advice about a secret this Mac does have (ADR-0009).
+test('a locked Keychain is not a missing secret: opening the worker says to unlock it', async () => {
+  const { run } = await installed();
+  const { code, io } = await run(status, { secretKeychain: lockedKeychain() });
+  assert.equal(code, 1);
+  assert.equal(io.lines.at(-1), 'Связка ключей заблокирована: разблокируйте её и повторите.');
 });

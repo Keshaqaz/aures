@@ -4,6 +4,8 @@ import { setup } from '../src/cli/setup.ts';
 import { credit } from './support/fake-world.ts';
 import { cliWorld, terminal } from './support/cli-world.ts';
 import type { CliWorld, RunOptions } from './support/cli-world.ts';
+import { KeychainUnavailable } from '../src/cli/keychain.ts';
+import type { Keychain } from '../src/cli/keychain.ts';
 import { USER_SETTINGS } from './support/fake-google.ts';
 import type { FakeProject } from './support/fake-google.ts';
 
@@ -372,6 +374,20 @@ test('setup over an install on Google, or over none, says nothing of GitHub', as
   const first = await fresh.run();
   assert.equal(first.code, 0, first.io.output());
   assert.ok(!first.io.output().includes('codex-auto-resets-worker'), 'no GitHub step without an install record');
+});
+
+// A locked Keychain would read as no secret: setup would deploy a worker under a secret nobody
+// has. It reads the secret directly and stops before touching anything.
+test('a locked Keychain stops setup before anything is touched', async () => {
+  const cli = await googleWorld();
+  const locked: Keychain = { read: async () => { throw new KeychainUnavailable(); }, write: async () => {}, remove: async () => {} };
+  const { code, io } = await cli.run({ secretKeychain: locked });
+  assert.equal(code, 1);
+  assert.equal(io.lines.at(-1), 'Не удалось прочитать секрет воркера из Связки ключей. Разблокируйте её и повторите.');
+  assert.deepEqual(cli.world.google.requests, [], 'neither Google nor the web app was called');
+  assert.deepEqual(cli.world.google.opened, [], 'no page was opened');
+  assert.deepEqual(cli.world.requests, [], 'ChatGPT was not called either');
+  assert.equal(await cli.mac.files.readInstall(), null, 'no install record was written');
 });
 
 test('setup in English goes in the same four stages, with no question about the platform', async () => {
