@@ -7,7 +7,7 @@ import { CommandFailed, unfinished, command } from './common.ts';
 import type { CommandOptions } from './common.ts';
 import { openWorker } from './active-worker.ts';
 import type { Worker } from './active-worker.ts';
-import type { Install } from './watch-files.ts';
+import type { Install } from './mac-files.ts';
 import type { Mac } from './common.ts';
 import { t } from './language.ts';
 

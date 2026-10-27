@@ -6,7 +6,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { AGENT_LABEL, LaunchAgent } from '../src/cli/launch-agent.ts';
-import { WatchFiles } from '../src/cli/watch-files.ts';
+import { MacFiles } from '../src/cli/mac-files.ts';
 import { fakeLaunchctl, fakeMac, leftoverCheck, UID } from './support/fake-mac.ts';
 import { tempDir } from './support/temp-dir.ts';
 
@@ -78,7 +78,7 @@ test('remove deletes the plist before bootout, which kills the process that runs
 // computer session and watch.json; the files of this install stay (ADR-0009).
 test('watch, which the left agent runs, removes the session and watch.json, the log and the agent, and prints nothing', async () => {
   const home = await tempDir('watch-home-');
-  const files = new WatchFiles({ dir: join(home, 'Library', 'Application Support', 'codex-auto-resets') });
+  const files = new MacFiles({ dir: join(home, 'Library', 'Application Support', 'codex-auto-resets') });
   const agent = new LaunchAgent({ home, uid: UID });
   await leftoverCheck({ home, launchctl: fakeLaunchctl(), agent, files });
   await files.writeInstall({ platform: 'google' });

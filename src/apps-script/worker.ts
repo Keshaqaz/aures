@@ -5,7 +5,7 @@ import { revoke as revokeSession } from '../chatgpt/session.ts';
 import { TransientFailure, object } from '../chatgpt/http.ts';
 import type { TransientReason } from '../chatgpt/http.ts';
 import { migrateState, readRules, readLogin, BrokenState, STATE_FORMAT_VERSION, RULES_FORMAT_VERSION } from '../worker/state-file.ts';
-import type { State, Rules, Login, Pending, BrokenStateReason } from '../worker/state-file.ts';
+import type { State, Rules, Login, BrokenStateReason } from '../worker/state-file.ts';
 import { openSummary } from '../worker/summary.ts';
 import type { Summary } from '../worker/summary.ts';
 import { settle } from './sync-promise.ts';
@@ -21,8 +21,8 @@ export const JOURNAL_SIZE = 30;
 // A run waits this long for another one to finish: two ticks in one minute happen (probe 01).
 const LOCK_WAIT_MS = 30_000;
 
-// What started a run: the schedule, the Mac, a trial run, «Применить сейчас» or `login`.
-export type RunKind = 'scheduled' | 'mac' | 'trial' | 'apply_now' | 'login';
+// What started a run: the schedule, a trial run, «Применить сейчас» or `login`.
+export type RunKind = 'scheduled' | 'trial' | 'apply_now' | 'login';
 export type RunOutcome = TickOutcome | 'broken_state';
 // One run in the journal; at is ISO time.
 // A trial run that found a reset for the rules names it and why: what they would apply.
@@ -133,16 +133,14 @@ export function appsScriptWorker({ gas, secret }: WorkerOptions): Worker {
   const scheduled = (g: AppsScript): boolean => g.ScriptApp.getProjectTriggers().some(t => t.getHandlerFunction() === TICK_FUNCTION);
 
   // Revokes the worker session in OpenAI; the state keeps it, and the next tick finds it lost.
-  // With keepPending it keeps an application with an unknown outcome: under the lock, no tick
-  // can start one between the CLI's last status and this revocation, so it refuses with pending.
-  const revoke = (g: AppsScript, { keepPending = false } = {}): { outcome: 'revoked' | 'revoke_failed' | 'no_session' | 'pending';
-    reason?: TransientReason; pending?: { creditId: string; reason: Pending['reason'] } } => {
+  // Only uninstall calls this: an application whose outcome is unknown does not stop it — under
+  // the lock no tick can start one between the CLI's last status and this revocation.
+  const revoke = (g: AppsScript): { outcome: 'revoked' | 'revoke_failed' | 'no_session'; reason?: TransientReason } => {
     let state: State;
     try { state = loadState(g.PropertiesService.getScriptProperties()); } catch (error) {
       if (error instanceof BrokenState) return { outcome: 'no_session' };
       throw error;
     }
-    if (keepPending && state.pending) return { outcome: 'pending', pending: { creditId: state.pending.creditId, reason: state.pending.reason } };
     const { fetch, flush } = urlFetch(g);
     try {
       settle(revokeSession(fetch, state.session), flush);
@@ -175,7 +173,6 @@ export function appsScriptWorker({ gas, secret }: WorkerOptions): Worker {
       return { ok: true, version: pkg.version, schedule: scheduled(g), rules, summary, journal: journal(props) };
     } },
     trial: { locked: true, act: g => view(runTick(g, 'trial', { trial: true })) },
-    wake: { locked: true, act: g => view(runTick(g, 'mac')) },
     apply_now: { locked: true, act: (g, { creditId }) =>
       typeof creditId === 'string' && creditId ? view(runTick(g, 'apply_now', { applyNow: creditId })) : null },
     // A worker without a schedule is not the active one yet (setup), so its login spends
@@ -199,7 +196,6 @@ export function appsScriptWorker({ gas, secret }: WorkerOptions): Worker {
       schedule(g, on);
       return { ok: true, schedule: on };
     } },
-    revoke: { locked: true, act: g => ({ ok: true, ...revoke(g, { keepPending: true }) }) },
     // Leaves nothing that runs or holds a session: the project itself only the user can delete.
     // A revocation OpenAI did not confirm keeps the state, so that a repeated uninstall retries it.
     uninstall: { locked: true, act: g => {

@@ -149,12 +149,12 @@ test(`the journal keeps the latest ${JOURNAL_SIZE} runs with time, outcome, dura
   const { world, gas } = await installed();
   for (let i = 0; i < JOURNAL_SIZE + 5; i++) {
     world.advance(5 * MINUTE);
-    if (i % 2) gas.tick(); else post(gas, 'wake');
+    if (i % 2) gas.tick(); else post(gas, 'trial');
   }
   const entries = journal(gas);
   assert.equal(entries.length, JOURNAL_SIZE);
   assert.equal(entries.at(-1)?.at, new Date(world.now).toISOString());
-  assert.deepEqual(new Set(entries.map(e => e.kind)), new Set(['scheduled', 'mac']));
+  assert.deepEqual(new Set(entries.map(e => e.kind)), new Set(['scheduled', 'trial']));
   for (const entry of entries) assert.ok(Number.isInteger(entry.durationMs) && entry.durationMs >= 0);
 });
 
@@ -238,44 +238,30 @@ test('status names the rules apart from the summary, so setup knows what is miss
   assert.deepEqual([post(gas, 'status').rules, post(gas, 'status').summary], [RULES, null]);
 });
 
-test('wake runs an ordinary tick for the Mac', async () => {
-  const { world, gas } = await installed();
-  world.chatgpt.credits = [credit('reset-a', world.now + 10 * MINUTE)];
-  assert.equal(post(gas, 'wake').outcome, 'applied');
-  assert.equal(journal(gas).at(-1)?.kind, 'mac');
+// The check from this Mac is gone (ADR-0009), and with it the actions it called: a CLI 0.6.x
+// never sends them, and a request of its own is answered as any unknown action.
+test('the actions of the check from this Mac are gone: wake and revoke answer unknown_action', async () => {
+  const { gas } = await installed();
+  assert.deepEqual(post(gas, 'wake'), { ok: false, error: 'unknown_action' });
+  assert.deepEqual(post(gas, 'revoke'), { ok: false, error: 'unknown_action' });
 });
 
-test('revoke ends the worker session in OpenAI; the next tick finds it lost', async () => {
-  const { world, gas, session } = await installed();
-  assert.deepEqual(post(gas, 'revoke'), { ok: true, outcome: 'revoked' });
-  assert.deepEqual(world.auth.revoked, [session.refreshToken]);
-  world.advance(expiry(session) - world.now);
-  assert.throws(() => gas.tick(), /lost its ChatGPT sign-in/);
-  world.auth.revokeFail = { status: 503 };
-  assert.deepEqual(post(gas, 'revoke'), { ok: true, outcome: 'revoke_failed', reason: 'revoke_503' });
-});
-
-test('revoke refuses while an application has an unknown outcome and keeps the session; uninstall revokes anyway', async () => {
+test('uninstall ends the worker session in OpenAI also while an application has an unknown outcome', async () => {
   const { world, gas, session } = await installed();
   world.chatgpt.credits = [credit('reset-a', world.now + 20 * MINUTE)];
   post(gas, 'schedule', { on: true });
   world.chatgpt.lose = 'after';
   gas.tick();
   world.chatgpt.lose = null;
-  assert.deepEqual(post(gas, 'revoke'), { ok: true, outcome: 'pending', pending: { creditId: 'reset-a', reason: 'before_expiry' } });
-  assert.deepEqual(world.auth.revoked, []);
+  assert.ok(state(gas).pending, 'an application whose outcome is unknown is pending');
   assert.deepEqual(post(gas, 'uninstall'), { ok: true, outcome: 'revoked' });
   assert.deepEqual(world.auth.revoked, [session.refreshToken]);
   noViolations(world, gas);
 });
 
-test('revoke and uninstall end the session even when the rules do not read', async () => {
+test('uninstall ends the session even when the rules do not read', async () => {
   const { world, gas, session } = await installed();
   gas.properties.delete('rules');
-  assert.deepEqual(post(gas, 'revoke'), { ok: true, outcome: 'revoked' });
-  assert.deepEqual(world.auth.revoked, [session.refreshToken]);
-  gas.properties.set('rules', '{');
-  world.auth.revoked.length = 0;
   assert.deepEqual(post(gas, 'uninstall'), { ok: true, outcome: 'revoked' });
   assert.deepEqual(world.auth.revoked, [session.refreshToken]);
   assert.equal(gas.properties.size, 0);
@@ -314,7 +300,7 @@ test('a consent without the external services box answers scopes for the running
   assert.deepEqual(post(gas, 'status'), { ok: false, error: 'scopes' });
   assert.deepEqual(post(gas, 'login', { login: { id: 'login-1', session: world.login() } }), { ok: false, error: 'scopes' });
   assert.deepEqual(post(gas, 'trial'), { ok: false, error: 'scopes' });
-  assert.deepEqual(post(gas, 'wake'), { ok: false, error: 'scopes' });
+  assert.deepEqual(post(gas, 'apply_now', { creditId: 'reset-a' }), { ok: false, error: 'scopes' });
   // The failed trigger run, which Google mails, names what to do instead of the raw exception.
   assert.throws(() => gas.tick(), /aures: the worker script was not given every access.*aures setup/s);
   assert.equal(gas.lockHeld, false);
@@ -352,7 +338,7 @@ test('a wrong or missing secret gets one faceless reply and changes nothing', as
   post(gas, 'schedule', { on: true });
   const before = { properties: new Map(gas.properties), requests: world.requests.length, triggers: [...gas.triggers] };
   const replies: Reply[] = [];
-  for (const action of ['status', 'trial', 'apply_now', 'rules', 'login', 'schedule', 'wake', 'revoke', 'uninstall', 'nope']) {
+  for (const action of ['status', 'trial', 'apply_now', 'rules', 'login', 'schedule', 'uninstall', 'nope']) {
     replies.push(gas.doPost({ secret: 'fake-secret-0123456788', action, on: false, creditId: 'reset-a' }));
     replies.push(gas.doPost({ action }));
   }
@@ -375,9 +361,9 @@ test('no reply carries a token or the state', async () => {
   const { world, gas } = await installed();
   world.chatgpt.credits = [credit('reset-a', world.now + 20 * MINUTE), credit('reset-b', world.now + 3 * DAY)];
   const texts = [
-    post(gas, 'status'), post(gas, 'trial'), post(gas, 'wake'), post(gas, 'apply_now', { creditId: 'reset-b' }),
+    post(gas, 'status'), post(gas, 'trial'), post(gas, 'apply_now', { creditId: 'reset-b' }),
     post(gas, 'login', { login: { id: 'login-2', session: world.login() } }), post(gas, 'rules', { rules: RULES }),
-    post(gas, 'schedule', { on: true }), post(gas, 'status'), post(gas, 'revoke'), post(gas, 'uninstall'),
+    post(gas, 'schedule', { on: true }), post(gas, 'status'), post(gas, 'uninstall'),
   ].map(reply => JSON.stringify(reply));
   const secrets = world.auth.sessions.flatMap(s => [s.refresh, s.access ?? '']).filter(Boolean);
   for (const text of texts) {

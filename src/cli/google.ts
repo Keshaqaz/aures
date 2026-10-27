@@ -9,7 +9,7 @@ import { MANIFEST, PROJECT_FILES, PROJECT_TITLE, secretSource } from '../apps-sc
 import { KeychainUnavailable } from './keychain.ts';
 import type { Keychain } from './keychain.ts';
 import type { OpenUrl } from './browser.ts';
-import type { WatchFiles } from './watch-files.ts';
+import type { MacFiles } from './mac-files.ts';
 import { CommandFailed } from './common.ts';
 import type { Io, Printer, Sleep } from './common.ts';
 import { t } from './language.ts';
@@ -36,7 +36,7 @@ const scopeName = (scope: GoogleScope): string => ({
 // prints at once, as the screen and the switch show it.
 export interface ConnectGoogleOptions {
   fetch: Fetch; keychain: Keychain; io: Printer; open: OpenUrl; now: () => number;
-  files?: Pick<WatchFiles, 'rememberAccount'>; fresh?: boolean;
+  files?: Pick<MacFiles, 'rememberAccount'>; fresh?: boolean;
   sign?: { waiting(url: string): () => void };
 }
 

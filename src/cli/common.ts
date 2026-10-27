@@ -11,7 +11,7 @@ import type { Rules, ApplyReason, AttemptResult } from '../worker/state-file.ts'
 import type { RunOutcome } from '../apps-script/worker.ts';
 import type { WouldApply } from '../worker/tick.ts';
 import type { Summary } from '../worker/summary.ts';
-import type { WatchFiles } from './watch-files.ts';
+import type { MacFiles } from './mac-files.ts';
 import type { LaunchAgent } from './launch-agent.ts';
 import type { Keychain } from './keychain.ts';
 import type { OpenUrl, CopyText } from './browser.ts';
@@ -44,7 +44,7 @@ export interface CommandOptions {
   timeZone?: string;
 }
 // This Mac: the files of the install and the agent left by the check from this Mac (ADR-0009).
-export interface Mac { files: WatchFiles; agent: LaunchAgent }
+export interface Mac { files: MacFiles; agent: LaunchAgent }
 // One of the general rules.
 export type Rule = Exclude<keyof Rules, 'formatVersion'>;
 

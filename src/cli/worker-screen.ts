@@ -3,7 +3,7 @@
 // the cursor stands on, and the live journal — when a run started, who started it and what it
 // came to — in a window of its own, as tall as the screen of the resets. The page keeps what it
 // read and is worded when drawn, as the overview, so the language changes on the spot.
-import type { Accounts } from './watch-files.ts';
+import type { Accounts } from './mac-files.ts';
 import { readJournal } from './journal.ts';
 import type { Journal, JournalEntry, JournalKind } from './journal.ts';
 import { projectUrl } from './active-worker.ts';
@@ -212,21 +212,21 @@ function outcomeOf(entry: JournalEntry, lastApplied: Summary['lastApplied']): [s
   return byOutcome[outcome] ?? [outcome, ''];
 }
 
-// Who started a run and what it came to: the schedule, the Mac of the weekly check or you — a
-// trial run, an «Apply now», a sign-in, a step of the CLI. What a run came to names what started
-// it up front, joined with a dash — or a colon, when the outcome has a dash of its own.
+// Who started a run and what came of it: the schedule or you — a trial run, an «Apply now», a
+// sign-in, a step of the CLI. What a run came to names what started it up front, joined with a
+// dash — or a colon, when the outcome has a dash of its own. An entry of a kind this version no
+// longer writes shows as yours, with what it came to alone.
 function entryLine(entry: JournalEntry, lastApplied: Summary['lastApplied']): { who: string; you: boolean; text: string; tone: string } {
   const start = ({
     trial: t('trial check', 'пробная проверка'),
     apply_now: t('«Apply now»', '«Применить сейчас»'),
     login: t('ChatGPT sign-in', 'вход в ChatGPT'),
-    mac: t('the weekly limit ran out', 'кончился недельный лимит'),
     scheduled: null,
   } as Record<JournalKind, string | null>)[entry.kind] ?? null;
   const [outcome, tone] = outcomeOf(entry, lastApplied);
   return {
-    who: entry.kind === 'scheduled' ? t('schedule', 'расписание') : entry.kind === 'mac' ? 'Mac' : t('you', 'вы'),
-    you: entry.kind !== 'scheduled' && entry.kind !== 'mac',
+    who: entry.kind === 'scheduled' ? t('schedule', 'расписание') : t('you', 'вы'),
+    you: entry.kind !== 'scheduled',
     text: start === null ? outcome : outcome.includes(' — ') ? `${start}: ${outcome}` : `${start} — ${outcome}`,
     tone,
   };

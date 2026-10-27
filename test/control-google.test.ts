@@ -139,7 +139,7 @@ test('rules on Google switch a rule in the worker and leave this Mac as it is', 
   assert.match(io.output(), /2\. Когда кончится недельный лимит — включено[\s\S]*2\. Когда кончится недельный лимит — выключено/);
   assert.equal(io.lines.at(-1), 'Правила сохранены и заработают со следующего запуска воркера.');
   assert.deepEqual(property('rules'), { formatVersion: 1, beforeExpiry: true, weeklyAutoApply: false });
-  assert.equal(mac.launchctl.calls.length, 0, 'the check from this Mac does not wake the worker on Google yet');
+  assert.equal(mac.launchctl.calls.length, 0, 'the rules command does not touch launchctl: the check from this Mac is gone');
 
   assert.equal((await run(rules, { answers: [''] })).io.lines.at(-1), 'Правила не изменились.');
   onlyWebApp();

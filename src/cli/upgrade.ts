@@ -3,7 +3,7 @@ import { GoogleFailure } from '../google/api.ts';
 import { CommandFailed, unfinished, notInstalled, command } from './common.ts';
 import type { CommandOptions, Sleep } from './common.ts';
 import { connectGoogle, deployWorker, askAfterDeploy, workerDid, readSecret } from './google.ts';
-import type { GoogleWorker } from './watch-files.ts';
+import type { GoogleWorker } from './mac-files.ts';
 import { removeCheckLeftovers } from './launch-agent.ts';
 import { t } from './language.ts';
 
@@ -33,7 +33,7 @@ export async function upgrade(options: UpgradeOptions): Promise<number> {
 // app keeps its URL, and the Script Properties with the state, the rules and the journal stay as
 // they are: what `upgrade` and «Починить» do. The doPost secret is new, as on every deploy. A
 // Google sign-in that ended opens again. The schedule is left as it is.
-export type RedeployOptions = Pick<UpgradeOptions, 'fetch' | 'googleKeychain' | 'secretKeychain' | 'io' | 'open' | 'mac' | 'appsScriptSource'> &
+export type RedeployOptions = Omit<UpgradeOptions, 'copy' | 'now' | 'sleep' | 'timeZone'> &
   { now: () => number; sleep: Sleep };
 export async function redeployGoogle({ fetch, googleKeychain, secretKeychain, io, open, mac, appsScriptSource, now, sleep }: RedeployOptions,
   google: GoogleWorker | undefined): Promise<void> {

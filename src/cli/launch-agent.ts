@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { rm, stat } from 'node:fs/promises';
-import type { WatchFiles } from './watch-files.ts';
+import type { MacFiles } from './mac-files.ts';
 
 // The launchd agent left behind by versions with the check from this Mac (ADR-0005): it runs
 // `aures watch` every 2 minutes. The check is gone (ADR-0009), so the agent is only removed —
@@ -58,7 +58,7 @@ export class LaunchAgent {
 // computer session and watch.json next to the install record, and the folder of its log. The
 // agent goes last — its bootout kills the `aures watch` that runs this. True when the agent was
 // there. watch, upgrade and uninstall all remove the leftovers through here.
-export async function removeCheckLeftovers({ files, agent }: { files: Pick<WatchFiles, 'remove'>; agent: LaunchAgent }): Promise<boolean> {
+export async function removeCheckLeftovers({ files, agent }: { files: Pick<MacFiles, 'remove'>; agent: LaunchAgent }): Promise<boolean> {
   for (const name of ['chatgpt-session.json', 'watch.json']) await files.remove(name);
   await agent.removeLogFolder();
   return agent.remove();

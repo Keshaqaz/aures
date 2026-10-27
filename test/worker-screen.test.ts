@@ -105,7 +105,7 @@ test('the journal columns: when, who started it and what came of it', () => {
     `│ ${row('12:00', 'вы', 'пробная проверка — применять нечего', 11, 10)}`,
     `│ ${row('12:00', 'вы', 'вход в ChatGPT — сессия воркера обновлена', 11, 10)}`,
   ]);
-  // The who of a run of this Mac is the user's, in cyan; the schedule is dim.
+  // The who of a run of the user is in cyan; the schedule is dim.
   assert.deepEqual(lines[WINDOW + 1]?.[2], ['расписание'.padEnd(12), S.dim]);
   assert.deepEqual(lines[WINDOW + 2]?.[2], ['вы'.padEnd(12), S.cyan]);
   // A step of the CLI says what it did, in dim, with no «aures · » before it.
@@ -116,7 +116,7 @@ test('what a run came to, by its outcome, in the tone it deserves', () => {
   const entries = [
     run('12:20', 'scheduled', 'transient_error'), run('12:15', 'scheduled', 'reauth_required'),
     run('12:10', 'scheduled', 'broken_state', 800, { reason: 'chatgpt' }),
-    run('12:05', 'mac', 'idle'), run('12:00', 'trial', 'would_apply', 800),
+    run('12:05', 'login', 'idle'), run('12:00', 'trial', 'would_apply', 800),
   ];
   const p = page({ journal: { schedule: true, entries, readAt: NOW, responseMs: 400 } });
   const lines = render(p, { rows: 5 });
@@ -124,7 +124,7 @@ test('what a run came to, by its outcome, in the tone it deserves', () => {
     [['расписание'.padEnd(12), S.dim], ['ChatGPT не ответил — повтор при следующем запуске', S.yellow]],
     [['расписание'.padEnd(12), S.dim], ['потерян вход в ChatGPT — нужен новый вход', S.red]],
     [['расписание'.padEnd(12), S.dim], ['данные не читаются (chatgpt)', S.red]],
-    [['Mac'.padEnd(12), S.dim], ['кончился недельный лимит — применять нечего', '']],
+    [['вы'.padEnd(12), S.cyan], ['вход в ChatGPT — сессия воркера обновлена', '']],
     [['вы'.padEnd(12), S.cyan], ['пробная проверка — применили бы сброс', '']],
   ], 'no duration on the right, and the start says what kind of run it was');
 });
@@ -179,7 +179,7 @@ test('the time is the clock for a run of today and a day and time for an older o
 
 test('the window scrolls in visual lines over the rail of its bracket', () => {
   const entries = ['12:00', '12:05', '12:10', '12:15', '12:20', '12:25']
-    .map((time, i) => run(time, i % 2 ? 'mac' : 'scheduled', 'idle'));
+    .map((time, i) => run(time, i % 2 ? 'trial' : 'scheduled', 'idle'));
   const p = page({ journal: { schedule: true, entries, readAt: NOW, responseMs: 400 } });
   assert.equal(journalWindow(p, [], { timeZone: 'UTC', now: () => NOW }).length, 6);
 
@@ -200,10 +200,10 @@ test('the window scrolls in visual lines over the rail of its bracket', () => {
 });
 
 test('without overflow the window has no heavy rail, and its lines are not three columns narrow', () => {
-  const p = page({ journal: { schedule: true, entries: [run('12:00', 'mac', 'idle', 300)], readAt: NOW, responseMs: 400 } });
+  const p = page({ journal: { schedule: true, entries: [run('12:00', 'trial', 'idle', 300)], readAt: NOW, responseMs: 400 } });
   const lines = render(p, { rows: 4 });
-  const text = 'кончился недельный лимит — применять нечего';
-  assert.match(plain(lines)[WINDOW] ?? '', new RegExp(`^│ 12:00 {2}Mac {2}${text}$`));
+  const text = 'пробная проверка — применять нечего';
+  assert.match(plain(lines)[WINDOW] ?? '', new RegExp(`^│ 12:00 {2}вы {2}${text}$`));
   assert.deepEqual(lines[WINDOW]?.[0], ['│ ', S.dim], 'no thumb without overflow');
   for (const line of lines.slice(WINDOW + 1, WINDOW + 4)) assert.deepEqual(line[0], ['│', S.dim]);
 });

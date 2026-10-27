@@ -17,7 +17,7 @@ import { CommandFailed, failedRunAdvice, trialVerdict, workingLine, notReadYet, 
   HINT_AFTER_MS } from './common.ts';
 import type { Io, Sleep } from './common.ts';
 import type { SetupOptions } from './setup.ts';
-import type { GoogleWorker } from './watch-files.ts';
+import type { GoogleWorker } from './mac-files.ts';
 import type { RunOutcome } from '../apps-script/worker.ts';
 import { t } from './language.ts';
 

@@ -5,7 +5,7 @@ import { readOverview, renderOverview, paint, WIDTH } from './overview.ts';
 import { fitOnRail } from './fit.ts';
 
 // `aures status`: the overview of the screen, printed once: the resets, the
-// rules, the worker and the warnings when the worker or the check from this Mac is not running.
+// rules, the worker and the warnings that need the user.
 export async function status(options: CommandOptions): Promise<number> {
   const { io, mac, now = Date.now, timeZone } = options;
   return command('status', io, async () => {

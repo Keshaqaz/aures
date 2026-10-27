@@ -26,11 +26,11 @@ const isGoogleWorker = (value: unknown): value is GoogleWorker => object(value) 
 const accountsOf = (value: unknown): Accounts => Object.fromEntries((['google', 'chatgpt'] as const)
   .flatMap(account => object(value) && typeof value[account] === 'string' ? [[account, value[account]]] : []));
 
-export interface WatchFilesOptions { dir?: string }
+export interface MacFilesOptions { dir?: string }
 
-export class WatchFiles {
+export class MacFiles {
   dir: string;
-  constructor({ dir = SUPPORT_DIR }: WatchFilesOptions = {}) { this.dir = dir; }
+  constructor({ dir = SUPPORT_DIR }: MacFilesOptions = {}) { this.dir = dir; }
   // null when the file is missing or does not parse.
   async read(name: string): Promise<unknown> {
     try { return JSON.parse(await readFile(join(this.dir, name), 'utf8')); } catch { return null; }

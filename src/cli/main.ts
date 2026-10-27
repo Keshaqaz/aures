@@ -10,7 +10,7 @@ import { rules } from './rules.ts';
 import { login } from './login.ts';
 import { upgrade } from './upgrade.ts';
 import { uninstall } from './uninstall.ts';
-import { WatchFiles } from './watch-files.ts';
+import { MacFiles } from './mac-files.ts';
 import { LaunchAgent, removeCheckLeftovers } from './launch-agent.ts';
 import { KeychainEntry, GOOGLE_TOKEN_ACCOUNT, WORKER_SECRET_ACCOUNT } from './keychain.ts';
 import { openInBrowser, copyToClipboard } from './browser.ts';
@@ -70,7 +70,7 @@ async function main(): Promise<number> {
     console.log(pkg.version);
     return 0;
   }
-  const files = new WatchFiles();
+  const files = new MacFiles();
   // The pick in settings.json wins; without one the language follows the system, and only
   // the pick is written — by `aures language` below or `l` on the screen.
   setLanguage(startLanguage(await files.readLanguage(), await readSystemLanguage()));

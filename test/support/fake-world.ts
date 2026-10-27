@@ -1,4 +1,4 @@
-// Single fake HTTP world for the GitHub-only worker: ChatGPT /wham/* and auth.openai.com
+// Single fake HTTP world of the worker: ChatGPT /wham/* and auth.openai.com
 // (device flow, refresh token rotation). It is a fetch implementation over a shared clock,
 // so tests drive time and the server state together. Never accepts real credentials.
 import { USER_AGENT } from '../../src/chatgpt/http.ts';

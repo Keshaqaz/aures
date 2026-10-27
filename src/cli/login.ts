@@ -4,7 +4,7 @@ import { CommandFailed, chatgptLogin, showCode, workingLine, command } from './c
 import type { CommandOptions, Io, Sleep } from './common.ts';
 import { openWorker } from './active-worker.ts';
 import type { Worker } from './active-worker.ts';
-import type { WatchFiles } from './watch-files.ts';
+import type { MacFiles } from './mac-files.ts';
 import { brokenOnGoogle } from './google.ts';
 import type { Fetch } from '../chatgpt/http.ts';
 import type { OpenUrl, CopyText } from './browser.ts';
@@ -27,7 +27,7 @@ export async function login(options: CommandOptions): Promise<number> {
   return command('login', io, async () => signInAgain(await openWorker(options, 'login'), { fetch, io, files, open, copy, now, sleep, timeZone }));
 }
 // files keeps the email of the account signed in to.
-export interface LoggingIn { fetch: Fetch; io: Io; files: Pick<WatchFiles, 'rememberAccount'>; open: OpenUrl; copy: CopyText;
+export interface LoggingIn { fetch: Fetch; io: Io; files: Pick<MacFiles, 'rememberAccount'>; open: OpenUrl; copy: CopyText;
   now: () => number; sleep: Sleep; timeZone: string | undefined }
 
 // A new worker session: what `aures login` and «войти заново» on the screen do. The session

@@ -12,7 +12,7 @@ import type { WorkerReply } from './google.ts';
 import { KeychainUnavailable } from './keychain.ts';
 import { RULES_FORMAT_VERSION } from '../worker/state-file.ts';
 import type { Rules } from '../worker/state-file.ts';
-import type { Install } from './watch-files.ts';
+import type { Install } from './mac-files.ts';
 import { t } from './language.ts';
 
 // One doPost to the worker on Google; the reply is the one of a worker that did what it was asked.

@@ -8,7 +8,7 @@ import type { WorkerReply } from './google.ts';
 import { projectUrl } from './active-worker.ts';
 import { removeCheckLeftovers } from './launch-agent.ts';
 import type { CommandOptions, Printer, Io, Mac } from './common.ts';
-import type { GoogleWorker } from './watch-files.ts';
+import type { GoogleWorker } from './mac-files.ts';
 import { t } from './language.ts';
 import { stat } from 'node:fs/promises';
 

@@ -4,7 +4,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { LaunchAgent, AGENT_LABEL } from '../../src/cli/launch-agent.ts';
 import type { Launchctl } from '../../src/cli/launch-agent.ts';
-import { WatchFiles } from '../../src/cli/watch-files.ts';
+import { MacFiles } from '../../src/cli/mac-files.ts';
 import type { Mac } from '../../src/cli/common.ts';
 import { tempDir } from './temp-dir.ts';
 
@@ -38,7 +38,7 @@ export async function fakeMac(): Promise<FakeMac> {
   const home = await tempDir('fake-mac-');
   const launchctl = fakeLaunchctl();
   const agent = new LaunchAgent({ home, uid: UID, launchctl: launchctl.run });
-  const files = new WatchFiles({ dir: join(home, 'Library', 'Application Support', 'codex-auto-resets') });
+  const files = new MacFiles({ dir: join(home, 'Library', 'Application Support', 'codex-auto-resets') });
   return { home, launchctl, agent, files };
 }
 
