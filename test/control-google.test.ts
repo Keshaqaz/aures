@@ -145,6 +145,15 @@ test('rules on Google switch a rule in the worker and leave this Mac as it is', 
   onlyWebApp();
 });
 
+test('rules on a worker without rules offer both on, as setup sets them (issue 24)', async () => {
+  const { gas, run, property } = await installed();
+  gas.properties.delete('rules');
+  const { code, io } = await run(rules, { answers: [''] });
+  assert.equal(code, 0, io.output());
+  assert.match(io.output(), /2\. Когда кончится недельный лимит — включено/);
+  assert.deepEqual(property('rules'), { formatVersion: 1, beforeExpiry: true, weeklyAutoApply: true });
+});
+
 test('a Mac without the install record finds the worker on Google by the link to its project', async () => {
   const { world, mac, keychain, project, run } = await installed();
   // Another Mac: no files of the CLI and nothing in the Keychain, nor the emails of the accounts.

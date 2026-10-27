@@ -242,7 +242,7 @@ export const deadline = (reset: Expiring, timeZone?: string): string => reset.ex
 export const byDeadline = <T extends Expiring>(resets: T[]): T[] => [...resets].sort((a, b) =>
   (a.expiresAt ? Date.parse(a.expiresAt) : Infinity) - (b.expiresAt ? Date.parse(b.expiresAt) : Infinity));
 
-export async function chooseRules(io: Io, initial: Pick<Rules, Rule> = { beforeExpiry: true, weeklyAutoApply: false }): Promise<Rules> {
+export async function chooseRules(io: Io, initial: Pick<Rules, Rule> = { beforeExpiry: true, weeklyAutoApply: true }): Promise<Rules> {
   const rules = { beforeExpiry: initial.beforeExpiry, weeklyAutoApply: initial.weeklyAutoApply };
   for (;;) {
     io.print(t('When to apply resets:', 'Когда применять сбросы:'));
