@@ -6,15 +6,14 @@
 brew install keshaqaz/tap/aures
 ```
 
-Формула скачивает архив выпуска из GitHub Release этого репозитория. Архив — `npm pack` пакета: `prepack` проверяет типы (`npm run typecheck`) и собирает `dist/worker.mjs`, а `bundleDependencies` кладут внутрь libsodium. Поэтому `brew install` не запускает npm и не ходит в сеть, кроме загрузки архива. Единственная зависимость формулы — `node` из Homebrew.
+Формула скачивает архив выпуска из GitHub Release этого репозитория. Архив — `npm pack` пакета: `prepack` проверяет типы (`npm run typecheck`) и собирает воркер для Apps Script, `dist/apps-script/worker.js`. Зависимостей у CLI нет, поэтому `brew install` не запускает npm и не ходит в сеть, кроме загрузки архива. Единственная зависимость формулы — `node` из Homebrew.
 
 Архив скачивается без авторизации, поэтому репозиторий и его выпуски должны быть публичными.
 
-Агент launchd проверки с Mac (ADR-0005) запускает `<prefix>/opt/aures/bin/aures watch`. Ссылка `opt` после `brew upgrade` указывает на новую версию, поэтому формуле ничего добавлять не нужно. `agentProgram` в `src/cli/launch-agent.ts` узнаёт установку Homebrew по пути `…/Cellar/aures/<версия>/libexec/src/cli/main.ts`, который задаёт обёртка формулы. Если формула меняет `libexec` или имя файла в `bin`, поменяйте `agentProgram` вместе с ней: `test/brew-release.test.ts` сверяет их.
+Агент launchd проверки с Mac, который поставили версии до 0.6.0 (ADR-0005), запускает `<prefix>/opt/aures/bin/aures watch`. Ссылка `opt` после `brew upgrade` указывает на новую версию, а её скрытая команда `watch` выгружает агента и удаляет его plist (ADR-0009). Поэтому имя `aures` в `bin` формулы и команду `watch` не меняйте, пока у пользователей могут оставаться такие агенты.
 
 ## Шаги
 
-0. Первый выпуск закрыт воротами по замеру из [ADR-0004](adr/0004-github-only-worker.md): нужен результат `prototype/cron-lag`, и максимальный разрыв между запусками cron должен укладываться в 8 часов.
 1. Поднимите `version` в `package.json`, закоммитьте и проверьте: `npm run typecheck && npm test`.
 2. Соберите архив и формулу:
 
@@ -42,13 +41,7 @@ brew install keshaqaz/tap/aures
    aures --version
    ```
 
-   Если на этом Mac включено недельное правило, проверьте, что агент запускает программу через `opt`-путь, а не через папку версии:
-
-   ```sh
-   plutil -extract ProgramArguments json -o - ~/Library/LaunchAgents/com.github.keshaqaz.codex-auto-resets.watch.plist
-   ```
-
-После `brew upgrade` пользователь обновляет воркер в своём репозитории командой `aures upgrade`.
+После `brew upgrade` пользователь обновляет воркер в своём проекте скрипта командой `aures upgrade`.
 
 ## Проверка формулы до публикации
 

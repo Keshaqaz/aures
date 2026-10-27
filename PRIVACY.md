@@ -4,7 +4,7 @@ AURES is an open-source command-line tool for macOS. It has no server of its own
 
 ## Google user data
 
-When you choose Google Apps Script as the worker platform, AURES asks you to sign in to Google and requests these scopes:
+The worker runs on Google Apps Script in your own Google account. To install it, AURES asks you to sign in to Google and requests these scopes:
 
 - `https://www.googleapis.com/auth/script.projects` — to create the worker's Apps Script project in your own Google account and upload its code;
 - `https://www.googleapis.com/auth/script.deployments` — to deploy that project as a web app and update the deployment on upgrade;
@@ -18,8 +18,8 @@ AURES's use and transfer of information received from Google APIs adheres to the
 
 ## Other data
 
-- The worker's ChatGPT sign-in is stored in the properties of the Apps Script project in your account (on Google) or encrypted in your private repository (on GitHub). The worker sends it only to OpenAI.
-- Your GitHub sign-in and the worker secret are stored in your Mac's Keychain.
+- The worker's ChatGPT sign-in is stored in the properties of the Apps Script project in your account. The worker sends it only to OpenAI.
+- The worker secret is stored in your Mac's Keychain.
 - AURES has no telemetry and no analytics.
 
 ## Deleting your data
@@ -30,4 +30,4 @@ AURES's use and transfer of information received from Google APIs adheres to the
 
 Questions: nnadelyaev@gmail.com or <https://github.com/Keshaqaz/aures/issues>.
 
-Last updated: 25 October 2026.
+Last updated: 27 October 2026.

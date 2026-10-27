@@ -5,9 +5,9 @@
 ### AUto-RESets for Codex
 
 Applies your issued ChatGPT rate-limit resets so they don't go to waste.<br>
-Runs in your own account — GitHub Actions or Google Apps Script. Your Mac can be off.
+Runs in your own Google account, on Google Apps Script. Your Mac can be off.
 
-[![version](https://img.shields.io/badge/version-0.5.8-8A2BE2)](https://github.com/Keshaqaz/aures/releases/latest)
+[![version](https://img.shields.io/badge/version-0.6.0-8A2BE2)](https://github.com/Keshaqaz/aures/releases/latest)
 [![platform](https://img.shields.io/badge/CLI-macOS-000?logo=apple)](docs/installation.en.md)
 [![node](https://img.shields.io/badge/node-%E2%89%A526-339933?logo=nodedotjs&logoColor=white)](docs/installation.en.md)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -20,21 +20,20 @@ Runs in your own account — GitHub Actions or Google Apps Script. Your Mac can 
 
 ## Features
 
-- **No reset expires unused.** The worker applies a reset before it expires: within the last 8 hours on GitHub, the last hour on Google.
-- **Weekly limit hit — reset within minutes.** An optional rule applies the reset that expires first. On Google the worker checks the limit itself every 5 minutes, even with the Mac off; on GitHub, while the Mac is awake, it checks the weekly limit every 2 minutes and calls the worker as soon as it runs out, whichever client used it up: Codex, opencode, your phone.
-- **One screen.** `aures` shows the resets on top and the rules below. Enter on a reset applies it now, regardless of the rules; Enter on a rule switches it. `Tab` opens the «Worker» screen: the platform with its state, the accounts, «Check now» (a trial run that applies nothing), «Repair» (deploys this version of the worker again and brings its schedule back), «Pause» (the schedule off; «Apply now» still works), «Switch to …» (the other platform without a reinstall) and the live journal of the worker, polled while the screen is open. The screen, pause and switching are detailed in the [guide](docs/installation.en.md).
-- **No servers, no subscriptions.** Everything in your account: GitHub Actions (up to ~750 of the 2,000 free minutes a month) or Google Apps Script (~5–10 of the 90 free trigger-minutes a day).
-- **Codex on your Mac is untouched.** The worker and the Mac check have ChatGPT sign-ins of their own; nothing is copied from Codex.
+- **No reset expires unused.** The worker applies a reset in the last hour before it expires.
+- **Weekly limit hit — reset within minutes.** An optional rule applies the reset that expires first. The worker checks the limit itself every 5 minutes, even with the Mac off, whichever client used it up: Codex, opencode, your phone.
+- **One screen.** `aures` shows the resets on top and the rules below. Enter on a reset applies it now, regardless of the rules; Enter on a rule switches it. `Tab` opens the «Worker» screen: the worker and its state, the accounts, «Check now» (a trial run that applies nothing), «Repair» (deploys this version of the worker again and brings its schedule back), «Pause» (the schedule off; «Apply now» still works) and the live journal of the worker, polled while the screen is open. The screen and the pause are detailed in the [guide](docs/installation.en.md).
+- **No servers, no subscriptions.** Everything runs in your Google account, within ~5–10 of the 90 free trigger-minutes a day.
+- **Codex on your Mac is untouched.** The worker has a ChatGPT sign-in of its own; nothing is copied from Codex.
 
 > [!IMPORTANT]
 > ### 🔒 Your tokens never leave your accounts
 >
-> AURES has no server of its own and collects nothing. Everything runs on **your** Mac and in **your** account — GitHub or Google:
+> AURES has no server of its own and collects nothing. Everything runs on **your** Mac and in **your** Google account:
 >
-> - **Platform sign-ins** — GitHub and, on Google, the Google sign-in and the worker secret — stay in your Mac's Keychain.
-> - **The worker's ChatGPT sign-in** on GitHub lives in your private repo, encrypted with AES-256-GCM; the key is an Actions secret that only your own workflow can read. On Google it lives in your script project's properties, unencrypted — a key would sit right next to it; the worker's web app answers only requests with the secret from your Keychain and never returns tokens.
-> - **The Mac check's ChatGPT sign-in** stays in a file on your Mac.
-> - The CLI and the worker talk to GitHub, Google and OpenAI only. No telemetry, no third parties, not even the author.
+> - **The Google sign-in and the worker secret** stay in your Mac's Keychain.
+> - **The worker's ChatGPT sign-in** lives in your script project's properties, unencrypted — a key would sit right next to it. The worker's web app answers only requests with the secret from your Keychain and never returns tokens.
+> - The CLI and the worker talk to Google and OpenAI only. No telemetry, no third parties, not even the author.
 >
 > The code is open: see for yourself in [src/](src/).
 
@@ -45,42 +44,45 @@ brew install keshaqaz/tap/aures
 aures setup
 ```
 
-`setup` asks where the worker will run — Google Apps Script (every 5 minutes) or GitHub Actions (about once an hour) — and goes in stages, each telling what it does and why: `[1/5] Platform`, `[2/5] Signing in to Google`, `[3/5] The worker on Google`, `[4/5] Signing in to ChatGPT`, `[5/5] First run`. It opens every page itself, and when it is done the main screen opens. What to click on each Google screen is in the [guide](docs/installation.en.md#quick-install).
+`setup` goes in stages, each telling what it does and why: `[1/4] Signing in to Google`, `[2/4] The worker on Google`, `[3/4] Signing in to ChatGPT`, `[4/4] First run`. It opens every page itself, and when it is done the main screen opens. What to click on each Google screen is in the [guide](docs/installation.en.md#quick-install).
 
-<img src="docs/assets/setup-en.png" alt="aures setup on Google Apps Script: the platform, five stages with their reasons and ticks, Done and the screen opening">
+<img src="docs/assets/setup-en.png" alt="aures setup: four stages with their reasons and ticks, Done and the screen opening">
 
 The CLI speaks your Mac's language — Russian on a Russian locale, English on any other; `l` on the screen or `aures language` switches it.
 
 Full guide, including installing from source: [docs/installation.en.md](docs/installation.en.md).
 
+> [!NOTE]
+> **Had a worker on GitHub?** Versions before 0.6.0 could run it on GitHub Actions. Delete its private repository `codex-auto-resets-worker` on GitHub by hand (its schedule keeps running until you do), then run `aures setup`. Details in the [guide](docs/installation.en.md#had-a-worker-on-github).
+
 ## Commands
 
 | Command | What it does |
 | --- | --- |
-| *(no command)* | the screen: resets and rules; Enter applies a reset or switches a rule; `Tab` — the «Worker» screen: check, repair, pause, switch platform, the journal |
-| `setup` | install, or finish an interrupted install; asks for the platform |
-| `status` | the same overview printed once: resets, rules, worker health and the Mac check |
+| *(no command)* | the screen: resets and rules; Enter applies a reset or switches a rule; `Tab` — the «Worker» screen: check, repair, pause, the journal |
+| `setup` | install, or finish an interrupted install |
+| `status` | the same overview printed once: resets, rules and worker health |
 | `apply-now` | apply a chosen reset now |
 | `rules` | choose when resets are applied |
 | `login` | sign the worker in to ChatGPT again |
 | `upgrade` | update the worker after a new version |
-| `uninstall` | remove the worker, the Mac check and the sign-ins |
+| `uninstall` | remove the worker and the sign-ins |
 | `language en` / `language ru` | the language of the CLI; `l` on the screen does the same |
 
 ## The «Worker» screen
 
-`Tab` on the screen opens the worker itself, on either platform:
+`Tab` on the screen opens the worker itself:
 
 <div align="center">
-<img src="docs/assets/worker-en.png" alt="The «Worker» screen: the platform and its state, the accounts, the actions and the live journal">
+<img src="docs/assets/worker-en.png" alt="The «Worker» screen: the worker and its state, the accounts, the actions and the live journal">
 </div>
 
-- **Worker** — the platform, its state on the right (active, on pause, switch unfinished) and a link to the repo or the script project.
-- **Accounts** — the GitHub or Google account and the worker's ChatGPT sign-in; Enter on either signs in again.
-- **Actions** — «Check now» (a trial run that applies nothing), «Repair» (deploys this version of the worker again and brings its schedule back), «Pause» / «Unpause» (the schedule off and back on; «Apply now» still works on pause) and «Switch to …» (moves the worker to the other platform, no reinstall). Hold the cursor on an action for a moment and its caption opens under the row: what it does and what it leaves alone.
-- **Journal** — the last runs of the worker, newest first, in three columns: when, who started it (the schedule, the Mac or you) and what came of it. It is polled while the screen is open: every 30 seconds on Google, every minute on GitHub.
+- **Worker** — its state on the right (active, on pause, last run failed) and a link to the script project.
+- **Accounts** — the Google account and the worker's ChatGPT sign-in; Enter on either signs in again.
+- **Actions** — «Check now» (a trial run that applies nothing), «Repair» (deploys this version of the worker again and brings its schedule back) and «Pause» / «Unpause» (the schedule off and back on; «Apply now» still works on pause). Hold the cursor on an action for a moment and its caption opens under the row: what it does and what it leaves alone.
+- **Journal** — the last runs of the worker, newest first, in three columns: when, who started it (the schedule or you) and what came of it. It is polled every 30 seconds while the screen is open.
 
-The line under the header fills up from the last scheduled run to the next one expected. Only what is going on moves: a runner down the journal's bracket while the worker is read, the bracket of a section filling up while an action runs (or a runner going round it when its time is unknown). `AURES_MOTION=off` keeps the screen still.
+The line under the header fills up from the last scheduled run to the next one. Only what is going on moves: a runner down the journal's bracket while the worker is read, the bracket of a section filling up while an action runs (or a runner going round it when its time is unknown). `AURES_MOTION=off` keeps the screen still.
 
 Details in the [guide](docs/installation.en.md#the-worker-screen).
 
@@ -88,16 +90,14 @@ Details in the [guide](docs/installation.en.md#the-worker-screen).
 
 ```mermaid
 flowchart LR
-  hour(["⏰ hourly (GitHub)<br/>or every 5 min (Google)"])
-  mac(["💻 your Mac sees<br/>the weekly limit run out<br/>(GitHub)"])
+  tick(["⏰ every 5 minutes"])
   you(["⌨️ you press Enter<br/>on a reset"])
-  worker["<b>Worker</b><br/>GitHub Actions<br/>or Google Apps Script<br/>in your account"]
+  worker["<b>Worker</b><br/>Google Apps Script<br/>in your account"]
   due{"a rule fires<br/>or you asked?"}
   apply(["✅ reset applied<br/>in ChatGPT"])
   wait(["💤 waits for<br/>the next run"])
 
-  hour --> worker
-  mac --> worker
+  tick --> worker
   you --> worker
   worker --> due
   due -- yes --> apply
@@ -108,40 +108,34 @@ flowchart LR
   classDef check fill:#fff8c5,stroke:#d4a72c,color:#1f2328
   classDef ok fill:#1f883d,stroke:#1a7f37,color:#ffffff
   classDef idle fill:#eaeef2,stroke:#d0d7de,color:#57606a
-  class hour,mac,you trigger
+  class tick,you trigger
   class worker main
   class due check
   class apply ok
   class wait idle
 ```
 
-**The worker** lives on the platform you pick at setup: GitHub Actions runs it about once an hour (with delays), Google Apps Script every 5 minutes. It checks the resets against the rules and applies one when it's due. The Mac isn't needed for that: it only installs and controls the worker.
-
-**The Mac check** is a launchd agent that runs while the weekly rule is on (on GitHub). It reads the weekly limit with the Mac's own ChatGPT sign-in and, once the limit runs out, starts the worker right away instead of waiting for the scheduled run. The Mac never applies a reset itself: the worker reads the limit again and decides by the same rules. On Google no check is needed: the worker itself watches the limit every 5 minutes. Design: [ADR-0005](docs/adr/0005-weekly-check-from-mac.md).
+**The worker** is a Google Apps Script project in your account. A trigger runs it every 5 minutes: it reads the limits and the resets, checks them against the rules and applies one when it's due. The Mac isn't needed for that: it only installs and controls the worker. Design: [ADR-0007](docs/adr/0007-two-worker-platforms.md), [ADR-0009](docs/adr/0009-google-only-worker.md).
 
 | Rule | Default | When a reset is applied |
 | --- | --- | --- |
-| Before expiry | on | less than 8 hours are left before it expires on GitHub, or less than one hour on Google |
-| When the weekly limit runs out | on on Google, off on GitHub | the weekly limit is used up; the reset that expires first goes |
+| Before expiry | on | less than one hour is left before it expires |
+| When the weekly limit runs out | on | the weekly limit is used up; the reset that expires first goes |
 
 Both rules cover all resets and work independently; change them with `aures rules`.
 
 ## Limitations
 
-- **On GitHub the timing is approximate.** GitHub delays and skips scheduled runs, sometimes for hours. That's why the before-expiry rule works within an 8-hour window there, not at an exact minute. On Google the worker runs every 5 minutes, and the window is one hour.
-- **The Mac check (GitHub) works only while the Mac is awake** and you are logged in to it. Otherwise the scheduled run applies the reset, hours later. On Google no check is needed: the worker itself notices the end of the limit every 5 minutes.
-- **One more ChatGPT code (GitHub).** Turning the weekly rule on signs this Mac in to ChatGPT; the sign-in is kept in a file readable by your macOS user, and stays there when the rule is off; `aures uninstall` revokes it.
+- **A Google account is required.** At install time and on later sign-ins Google shows two «unverified app» warnings, once you turn on the Apps Script API switch, and on uninstall you delete the script project by hand.
 - **Paid ChatGPT plan required**, with 5-hour and weekly limits. On a plan with a single monthly limit the weekly rule never fires.
 - **macOS only.** The CLI keeps its sign-ins in the Keychain.
-- **Broad GitHub access.** The GitHub sign-in gives the CLI access to all your repositories, like `gh`.
-- **The price of Google.** At install time and on later sign-ins Google shows two «unverified app» warnings, once you turn on the Apps Script API switch, and on uninstall you delete the script project by hand.
-- **The worker's state on Google is not encrypted.** The worker's ChatGPT sign-in lives in the script project's properties: a key would sit right next to it ([ADR-0007](docs/adr/0007-two-worker-platforms.md)). The web app answers only requests with the secret from your Keychain.
+- **The worker's state is not encrypted.** The worker's ChatGPT sign-in lives in the script project's properties: a key would sit right next to it ([ADR-0007](docs/adr/0007-two-worker-platforms.md)). The web app answers only requests with the secret from your Keychain.
 - **A real reset applied by the worker has not been verified live yet.** Reading resets and limits, sign-in and the apply request have been; details in [ADR-0004](docs/adr/0004-github-only-worker.md).
 
 ## Documentation
 
 [Installation](docs/installation.en.md) ·
-[Design: ADR-0004](docs/adr/0004-github-only-worker.md), [ADR-0005](docs/adr/0005-weekly-check-from-mac.md), [ADR-0007](docs/adr/0007-two-worker-platforms.md) ·
+[Design: ADR-0007](docs/adr/0007-two-worker-platforms.md), [ADR-0009](docs/adr/0009-google-only-worker.md) ·
 [Glossary (ru)](docs/CONTEXT.md) ·
 [Releasing (ru)](docs/releasing.md)
 
@@ -149,24 +143,22 @@ Both rules cover all resets and work independently; change them with `aures rule
 
 ```
 src/
-  cli/        aures commands; watch, mac-check, launch-agent — the Mac check
-  worker/     the worker: run, rules, encrypted state, summary, workflow
+  cli/         aures commands and the screens; launch-agent removes what the Mac check of earlier versions left
+  worker/      the tick, the rules, the state and the summary
   apps-script/ the worker on Google Apps Script: runtime, doPost actions, journal
-  chatgpt/    ChatGPT device sign-in, resets and limits over HTTP
-  github/     GitHub API and the OAuth App
-  google/     Google OAuth client and the Apps Script API
-scripts/      worker build and Homebrew release
-test/         tests; support/ — fixtures
-docs/         guides, glossary, adr/
+  chatgpt/     ChatGPT device sign-in, resets and limits over HTTP
+  google/      Google OAuth client and the Apps Script API
+scripts/       worker build and Homebrew release
+test/          tests; support/ — fixtures
+docs/          guides, glossary, adr/
 ```
 
 ```sh
 npm ci
 npm test                          # offline, no network or credentials
 npm run typecheck                 # tsc type check, no build; Node runs the .ts directly
-npm run build:worker              # dist/worker.mjs, which setup and upgrade put into the repo
+npm run build:worker              # dist/apps-script/worker.js, which setup and upgrade deploy
 node src/cli/main.ts status       # CLI from source
-node src/cli/main.ts watch        # one pass of the Mac check, as the agent runs it
 npm run release:brew              # Homebrew archive and formula, see docs/releasing.md
 ```
 
