@@ -1,91 +1,30 @@
 import pkg from '../../package.json' with { type: 'json' };
-import { FILES } from '../worker/layout.ts';
-import { readRules, BrokenState, RULES_MIGRATIONS } from '../worker/state-file.ts';
-import { workflowYaml, workflowMinute } from '../worker/workflow.ts';
 import { GoogleFailure } from '../google/api.ts';
-import { CommandFailed, unfinished, connectGitHub, installedWorker, command } from './common.ts';
+import { CommandFailed, unfinished, notInstalled, command } from './common.ts';
 import type { CommandOptions, Sleep } from './common.ts';
 import { connectGoogle, deployWorker, askAfterDeploy, workerDid, readSecret } from './google.ts';
 import type { GoogleWorker } from './watch-files.ts';
-import type { Migration, Rules } from '../worker/state-file.ts';
 import { t } from './language.ts';
-import { reloadAgent } from './mac-check.ts';
 
 const updatedLine = (): string => t(`The worker is updated to ${pkg.version}. The changes take effect from the next run.`,
   `Воркер обновлён до версии ${pkg.version}. Изменения заработают со следующего запуска.`);
 
 // `aures upgrade`, after `brew upgrade`: puts this version's worker into the worker of this
-// install, on the platform the install record names (ADR-0007). Nothing changes the code that
-// runs with the user's session until the user runs this. A worker left on the other platform
-// gets this version when the user switches back to it.
-// workerSource is the GitHub worker bundle, appsScriptSource the Apps Script one; rulesMigrations
-// are the rules format steps.
-export interface UpgradeOptions extends CommandOptions { workerSource: string; appsScriptSource: string; rulesMigrations?: Migration[] }
+// install on Google. Nothing changes the code that runs with the user's session until the user
+// runs this. The worker migrates its state and rules itself when it reads them. The agent left
+// by the check from this Mac (ADR-0009) goes first: it would run a command that is gone.
+// appsScriptSource is the Apps Script worker bundle.
+export interface UpgradeOptions extends CommandOptions { appsScriptSource: string }
 export async function upgrade(options: UpgradeOptions): Promise<number> {
-  const { io, mac: { files }, now = Date.now, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)) } = options;
+  const { io, mac: { files, agent }, now = Date.now, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)) } = options;
   return command('upgrade', io, async () => {
+    await agent.remove();
     const install = await files.readInstall();
-    if (install?.platform === 'google') return upgradeGoogle({ ...options, now, sleep }, install.google);
-    return upgradeGitHub({ ...options, now, sleep });
-  });
-}
-
-// On GitHub: the worker and the workflow go into the user's repository and the rules file is
-// migrated. The worker migrates its sealed state itself when it reads it. The agent of the
-// check from this Mac is reloaded with this version's program.
-async function upgradeGitHub({ fetch, keychain, io, open, copy, workerSource, mac, now, sleep, rulesMigrations = RULES_MIGRATIONS }:
-  UpgradeOptions & { now: () => number; sleep: Sleep }): Promise<number> {
-  const { api, login } = await connectGitHub({ fetch, keychain, io, open, copy, now, sleep });
-  const repo = await installedWorker({ api, login });
-  const name = repo.full_name;
-  const [worker, workflow, rules] = await Promise.all([api.file(name, FILES.worker), api.file(name, FILES.workflow),
-    api.file(name, FILES.rules)]);
-  if (!worker || !workflow || !rules) {
-    throw new CommandFailed(unfinished());
-  }
-  // The cron is never rewritten: the new workflow runs at the same minute.
-  const minute = workflowMinute(workflow.text);
-  if (minute === null) {
-    throw new CommandFailed(t(`The file ${FILES.workflow} was changed by hand. Delete it in the repository and run \`aures setup\`.`,
-      `Файл ${FILES.workflow} изменён вручную. Удалите его в репозитории и запустите \`aures setup\`.`));
-  }
-  let current: Rules;
-  try { current = readRules(rules.text, rulesMigrations); } catch (error) {
-    if (!(error instanceof BrokenState)) throw error;
-    throw new CommandFailed(error.reason === 'rules_format_unknown' ?
-      t('The rules were saved by a newer version. Update the program: `brew upgrade aures`.',
-        'Правила сохранены более новой версией. Обновите программу: `brew upgrade aures`.') :
-      t('The rules do not read. Choose them again: `aures rules`, then run upgrade again.',
-        'Правила не читаются. Выберите их заново: `aures rules`, затем повторите upgrade.'));
-  }
-  await reloadAgent({ weekly: current.weeklyAutoApply, mac, io });
-
-  // The new worker reads the older rules, so it goes first; the workflow goes last, as in setup.
-  const writes: [file: string, text: string, message: string, sha: string][] = [];
-  if (worker.text !== workerSource) {
-    writes.push([FILES.worker, workerSource, `Upgrade the worker to ${pkg.version}`, worker.sha]);
-  }
-  // readRules has read it as an object.
-  if ((JSON.parse(rules.text) as { formatVersion?: unknown }).formatVersion !== current.formatVersion) {
-    writes.push([FILES.rules, `${JSON.stringify(current, null, 2)}\n`,
-      `Migrate the general rules to format ${current.formatVersion}`, rules.sha]);
-  }
-  const yaml = workflowYaml({ minute });
-  if (workflow.text !== yaml) writes.push([FILES.workflow, yaml, `Upgrade the worker workflow to ${pkg.version}`, workflow.sha]);
-  if (!writes.length) {
-    io.print(t(`The worker is already the latest version (${pkg.version}).`, `Воркер уже последней версии (${pkg.version}).`));
+    if (!install) throw new CommandFailed(notInstalled());
+    await redeployGoogle({ ...options, now, sleep }, install.google);
+    io.print(updatedLine());
     return 0;
-  }
-  for (const [file, text, message, sha] of writes) await api.putFile(name, file, text, { message, sha });
-  io.print(updatedLine());
-  return 0;
-}
-
-// On Google: the bundle goes into the same project and deployment.
-async function upgradeGoogle(options: UpgradeOptions & { now: () => number; sleep: Sleep }, google: GoogleWorker | undefined): Promise<number> {
-  await redeployGoogle(options, google);
-  options.io.print(updatedLine());
-  return 0;
+  });
 }
 
 // Puts this version of the worker on Google into the same project and deployment, so the web

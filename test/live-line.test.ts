@@ -45,10 +45,10 @@ test('the indent of a wait text, as a stage of setup gives it, stands before the
 test('a wait text wider than the terminal is cut to stay on one line', () => {
   const output = stream(true, 20);
   const { wait } = liveLine(output, { now: () => 0 });
-  wait('GitHub поставил воркер в очередь');
+  wait('Воркер на Google применяет сброс…');
   wait(null);
   const drawn = (output.writes[0] ?? '').replace('\r\x1b[2K', '');
-  assert.equal(drawn, '⠋ GitHub пост… 0:00');
+  assert.equal(drawn, '⠋ Воркер на G… 0:00');
   assert.ok([...drawn].length < 20);
 });
 

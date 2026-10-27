@@ -4,21 +4,21 @@ import { setup } from '../src/cli/setup.ts';
 import { status } from '../src/cli/status.ts';
 import { upgrade } from '../src/cli/upgrade.ts';
 import { uninstall } from '../src/cli/uninstall.ts';
-import { GITHUB_OAUTH_CLIENT_ID } from '../src/github/oauth-app.ts';
 import { cliWorld } from './support/cli-world.ts';
+import { leftoverCheck } from './support/fake-mac.ts';
 import { bundle } from './support/fake-apps-script.ts';
+import { stat } from 'node:fs/promises';
 import type { FakeProject } from './support/fake-google.ts';
 
 const GOOGLE_LOGIN = 'https://accounts.google.com/';
 const CONNECTIONS = 'https://myaccount.google.com/connections';
-const OAUTH_APP_LINK = `https://github.com/settings/connections/applications/${GITHUB_OAUTH_CLIENT_ID}`;
+const exists = (path: string): Promise<boolean> => stat(path).then(() => true, () => false);
 const link = (project: FakeProject): string => `https://script.google.com/home/projects/${project.scriptId}`;
 
-// A worker installed on Google by setup with the default rules; in env, the platform is already chosen.
-async function onGoogle(env?: Awaited<ReturnType<typeof cliWorld>>) {
-  const answers = env ? [''] : ['2', ''];
-  env ??= await cliWorld();
-  const { code, io } = await env.run(setup, { answers });
+// A worker installed on Google by setup with the default rules.
+async function onGoogle() {
+  const env = await cliWorld();
+  const { code, io } = await env.run(setup);
   assert.equal(code, 0, io.output());
   const project = env.world.google.project();
   assert.ok(project?.gas);
@@ -32,7 +32,7 @@ test('upgrade on Google puts the new bundle into the same deployment: the URL, t
   const properties = new Map(gas.properties);
   const versions = project.versions.length;
   const next = `${await bundle()}\n// next version\n`;
-  const githubRequests = world.github.requests.length, opened = world.google.opened.length;
+  const opened = world.google.opened.length;
 
   const { code, io } = await run(upgrade, { appsScriptSource: next });
   assert.equal(code, 0, io.output());
@@ -44,7 +44,6 @@ test('upgrade on Google puts the new bundle into the same deployment: the URL, t
   assert.deepEqual(new Map([...gas.properties].filter(([key]) => key !== 'journal')),
     new Map([...properties].filter(([key]) => key !== 'journal')));
   assert.match(io.lines.at(-1) ?? '', /^Воркер обновлён до версии \d+\.\d+\.\d+\. Изменения заработают со следующего запуска\.$/);
-  assert.equal(world.github.requests.length, githubRequests, 'the GitHub repository is not asked');
   assert.deepEqual(world.google.opened.slice(opened), [], 'the kept sign-in is used');
 
   // The worker answers this Mac under the same URL with the new secret.
@@ -110,11 +109,9 @@ test('upgrade on Google sends a deleted project or deployment to setup', async (
 test('uninstall on Google stops the worker, deletes its web app, ends the Google sign-in and names the manual steps', async () => {
   const { world, mac, keychain, project, gas, run } = await onGoogle();
   const session = JSON.parse(gas.properties.get('state') ?? 'null').session as { refreshToken: string };
-  const githubRequests = world.github.requests.length;
   const { code, io } = await run(uninstall, { answers: ['y'] });
   assert.equal(code, 0, io.output());
   assert.match(io.output(), new RegExp(`Будут удалены воркер на Google \\(${link(project)}`));
-  assert.equal(world.github.requests.length, githubRequests, 'no GitHub sign-in for a worker that never was there');
   assert.deepEqual(gas.triggers, []);
   assert.equal(gas.authInvalidated, true);
   assert.deepEqual(world.auth.revoked, [session.refreshToken]);
@@ -133,36 +130,44 @@ test('uninstall on Google stops the worker, deletes its web app, ends the Google
   assert.deepEqual(world.google.violations, []);
 });
 
-test('uninstall with a worker on each platform, the one on GitHub retired, removes both', async () => {
-  const env = await cliWorld();
-  let result = await env.run(setup, { answers: ['1', ''] });
-  assert.equal(result.code, 0, result.io.output());
-  const repo = env.world.github.repo();
-  assert.ok(repo);
-  // Retired by a switch to Google: no schedule; its GitHub sign-in stays in the Keychain.
-  repo.workflowState = 'disabled_manually';
-  await env.mac.files.writeInstall({ platform: 'google' });
-  const { world, keychain, project, gas, run } = await onGoogle(env);
+test('upgrade removes the agent the check from this Mac of an earlier version left', async () => {
+  const { mac, run } = await onGoogle();
+  await leftoverCheck(mac);
+  const { code, io } = await run(upgrade);
+  assert.equal(code, 0, io.output());
+  assert.equal(mac.launchctl.loaded.size, 0);
+  assert.equal(await exists(mac.agent.plistPath), false);
+});
 
+test('uninstall removes what earlier versions left: the agent and log of the check from this Mac, its files and the GitHub sign-in', async () => {
+  const { mac, keychain, project, run } = await onGoogle();
+  await leftoverCheck(mac);
+  keychain.entries.set('github', 'gho_left');
   const { code, io } = await run(uninstall, { answers: ['y'] });
   assert.equal(code, 0, io.output());
-  // The move to Google is why GitHub is asked for anything at all; the line comes before the ask.
-  const kept = io.lines.indexOf('На этом Mac мог остаться вход в GitHub от прежнего воркера: aures проверит, есть ли его репозиторий, и предложит удалить его вместе с остальным.');
-  const asked = io.lines.indexOf('Для удаления репозитория GitHub просит отдельное разрешение: войдите ещё раз.');
-  assert.ok(kept !== -1 && kept < asked, io.output());
-  assert.match(io.output(), /Будут удалены репозиторий https:\/\/github\.com\/\S+ со всей историей, воркер на Google/);
-  assert.equal(world.github.repo(), undefined);
-  assert.deepEqual(gas.triggers, []);
-  assert.equal(project.deployments.size, 0);
-  assert.equal(world.google.refreshTokens.size, 0);
+  assert.equal(mac.launchctl.loaded.size, 0);
+  assert.equal(await exists(mac.agent.plistPath), false);
+  assert.equal(await exists(mac.agent.logPath), false);
+  assert.equal(await exists(mac.files.dir), false, 'the computer session and watch.json go with the folder');
   assert.equal(keychain.entries.size, 0);
   assert.deepEqual(io.lines.slice(-3), [
-    'Осталось сделать вручную:',
-    `  1. Удалите проект aures-worker на странице ${link(project)}`,
-    `  2. Закройте доступ к GitHub кнопкой Revoke на странице ${OAUTH_APP_LINK}`,
+    'Проверка с этого Mac от прежней версии удалена.',
+    'Вход в GitHub от прежней версии удалён из Связки ключей.',
+    `Последний шаг: удалите проект aures-worker на странице ${link(project)}`,
   ]);
-  assert.deepEqual(world.google.violations, []);
-  assert.deepEqual(world.github.violations, []);
+});
+
+test('uninstall over a record of the removed GitHub platform cleans this Mac and asks nothing', async () => {
+  const { mac, keychain, run } = await cliWorld();
+  await mac.files.write('install.json', { platform: 'github' });
+  await leftoverCheck(mac);
+  keychain.entries.set('github', 'gho_left');
+  const { code, io } = await run(uninstall);
+  assert.equal(code, 0, io.output());
+  assert.deepEqual(io.asked, []);
+  assert.equal(await exists(mac.files.dir), false);
+  assert.equal(await exists(mac.agent.plistPath), false);
+  assert.equal(keychain.entries.size, 0);
 });
 
 test('uninstall on Google with a worker that does not answer names the access to take back for sure', async () => {

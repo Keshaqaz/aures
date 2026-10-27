@@ -7,7 +7,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { archiveName, formula, packRelease, releaseUrl } from '../scripts/release-brew.ts';
-import { agentProgram } from '../src/cli/launch-agent.ts';
 import pkg from '../package.json' with { type: 'json' };
 
 const run = promisify(execFile);
@@ -23,10 +22,10 @@ test('the formula installs the release archive behind a node wrapper and tests -
   const text = formula({ version: '1.2.3', sha256 });
   assert.equal(releaseUrl('1.2.3'), 'https://github.com/Keshaqaz/aures/releases/download/v1.2.3/aures-1.2.3.tgz');
   assert.match(text, /^class Aures < Formula$/m);
-  // `brew audit --strict`: the description names neither platform alone, stays within
+  // `brew audit --strict`: the description stays within
   // 80 characters and starts with neither the formula's name nor an article.
   const desc = text.match(/^  desc "(.+)"$/m)?.[1] ?? '';
-  assert.equal(desc, 'Applies ChatGPT Codex resets from your own GitHub or Google Apps Script worker');
+  assert.equal(desc, 'Applies ChatGPT Codex resets from your own Google Apps Script worker');
   assert.ok(desc.length <= 80, `desc is ${desc.length} characters, over the 80 of brew audit --strict`);
   assert.doesNotMatch(desc, /^(aures|a|an|the)\b/i);
   assert.match(text, new RegExp(`^  url "${releaseUrl('1.2.3')}"$`, 'm'));
@@ -39,16 +38,7 @@ test('the formula installs the release archive behind a node wrapper and tests -
   assert.throws(() => formula({ version: '1.2.3', sha256: 'abc' }), RangeError);
 });
 
-test('the launchd agent recognizes a keg laid out by the formula and runs it through the opt link', () => {
-  const text = formula({ version: '1.2.3', sha256: 'a'.repeat(64) });
-  const [, bin] = text.match(/\(bin\/"([^"]+)"\)\.write/) ?? [];
-  const [, main] = text.match(/"#\{libexec}\/([^"]+)" "\$@"/) ?? [];
-  const keg = '/opt/homebrew/Cellar/aures/1.2.3';
-  assert.deepEqual(agentProgram({ main: `${keg}/libexec/${main}`, node: '/opt/homebrew/opt/node/bin/node' }),
-    [`/opt/homebrew/opt/aures/bin/${bin}`, 'watch']);
-});
-
-test('the release archive carries the CLI, both worker bundles and its dependencies, and runs on its own', async t => {
+test('the release archive carries the CLI and the worker bundle, needs no dependencies and runs on its own', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'brew-release-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const { file, sha256 } = await packRelease(dir);
@@ -57,13 +47,12 @@ test('the release archive carries the CLI, both worker bundles and its dependenc
 
   await run('tar', ['-xzf', file, '-C', dir]);
   const root = join(dir, 'package');
-  assert.deepEqual((await readdir(root)).sort(), ['LICENSE', 'README.md', 'dist', 'node_modules', 'package.json', 'src']);
-  assert.deepEqual((await readdir(join(root, 'dist'))).sort(), ['apps-script', 'worker.mjs']);
+  assert.deepEqual((await readdir(root)).sort(), ['LICENSE', 'README.md', 'dist', 'package.json', 'src']);
+  assert.deepEqual(await readdir(join(root, 'dist')), ['apps-script']);
   assert.deepEqual(await readdir(join(root, 'dist/apps-script')), ['worker.js']);
-  assert.deepEqual((await readdir(join(root, 'node_modules'))).sort(), ['libsodium', 'libsodium-wrappers']);
   assert.ok((await stat(join(root, 'src/cli/main.ts'))).isFile());
 
-  // Outside the checkout there is no node_modules up the tree: the archive brings its own.
+  // Outside the checkout there is no node_modules up the tree, and the CLI needs none.
   const { stdout } = await run(process.execPath, [join(root, 'src/cli/main.ts'), '--version'], { cwd: dir });
   assert.equal(stdout, `${pkg.version}\n`);
 });

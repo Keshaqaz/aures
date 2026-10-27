@@ -1,5 +1,4 @@
-// node:crypto in the Apps Script bundle. Of it the worker runs only tick's randomUUID there;
-// the state encryption of the GitHub worker is never called.
+// node:crypto in the Apps Script bundle. Of it the worker runs only tick's randomUUID.
 import { appsScript } from './runtime.ts';
 
 export const randomUUID = (): string => appsScript().Utilities.getUuid();

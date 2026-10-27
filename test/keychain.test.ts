@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ChildProcess } from 'node:child_process';
 import { PassThrough } from 'node:stream';
-import { GitHubTokenKeychain, KeychainEntry, KeychainUnavailable, GOOGLE_TOKEN_ACCOUNT, WORKER_SECRET_ACCOUNT } from '../src/cli/keychain.ts';
+import { KeychainEntry, KeychainUnavailable, GITHUB_TOKEN_ACCOUNT, GOOGLE_TOKEN_ACCOUNT, WORKER_SECRET_ACCOUNT } from '../src/cli/keychain.ts';
 import type { Spawn } from '../src/cli/keychain.ts';
 
 const TOKEN = 'gho_synthetic0000000000000000000000000000';
@@ -33,13 +33,13 @@ function fakeSecurity({ code = null }: { code?: number | null } = {}) {
   return { spawnImpl, entries, calls };
 }
 
-test('the GitHub token lives in the Keychain as codex-auto-resets/github and travels only through stdin', async () => {
+test('a secret lives in the Keychain as codex-auto-resets/<account> and travels only through stdin', async () => {
   const security = fakeSecurity();
-  const keychain = new GitHubTokenKeychain({ spawnImpl: security.spawnImpl });
+  const keychain = new KeychainEntry(GOOGLE_TOKEN_ACCOUNT, { spawnImpl: security.spawnImpl });
   assert.equal(await keychain.read(), null);
   await keychain.write(TOKEN);
   assert.equal(await keychain.read(), TOKEN);
-  assert.deepEqual([...security.entries], [['codex-auto-resets/github', TOKEN]]);
+  assert.deepEqual([...security.entries], [['codex-auto-resets/google', TOKEN]]);
   await keychain.remove();
   await keychain.remove();
   assert.equal(await keychain.read(), null);
@@ -51,20 +51,20 @@ test('the GitHub token lives in the Keychain as codex-auto-resets/github and tra
 });
 
 test('a refusing Keychain is KeychainUnavailable, and values that are not tokens never reach security', async () => {
-  const keychain = new GitHubTokenKeychain({ spawnImpl: fakeSecurity({ code: 51 }).spawnImpl });
+  const keychain = new KeychainEntry(WORKER_SECRET_ACCOUNT, { spawnImpl: fakeSecurity({ code: 51 }).spawnImpl });
   for (const call of [() => keychain.read(), () => keychain.write(TOKEN), () => keychain.remove()]) {
     await assert.rejects(call(), KeychainUnavailable);
   }
   const security = fakeSecurity();
   for (const value of ['', 'token with space', `a\nb`, 'x -s other']) {
-    await assert.rejects(new GitHubTokenKeychain({ spawnImpl: security.spawnImpl }).write(value), KeychainUnavailable);
+    await assert.rejects(new KeychainEntry(WORKER_SECRET_ACCOUNT, { spawnImpl: security.spawnImpl }).write(value), KeychainUnavailable);
   }
   assert.equal(security.calls.length, 0);
 });
 
-test('the Google refresh token and the doPost secret live in entries of their own next to the GitHub token', async () => {
+test('the Google refresh token and the doPost secret live in entries of their own next to the GitHub token an earlier version left', async () => {
   const security = fakeSecurity();
-  const github = new GitHubTokenKeychain({ spawnImpl: security.spawnImpl });
+  const github = new KeychainEntry(GITHUB_TOKEN_ACCOUNT, { spawnImpl: security.spawnImpl });
   const google = new KeychainEntry(GOOGLE_TOKEN_ACCOUNT, { spawnImpl: security.spawnImpl });
   const secret = new KeychainEntry(WORKER_SECRET_ACCOUNT, { spawnImpl: security.spawnImpl });
   await github.write(TOKEN);

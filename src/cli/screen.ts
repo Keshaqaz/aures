@@ -3,7 +3,7 @@ import type { Key } from 'node:readline';
 import type { Fetch } from '../chatgpt/http.ts';
 import { RULES_FORMAT_VERSION } from '../worker/state-file.ts';
 import { revokeGoogle } from '../google/api.ts';
-import { CommandFailed, resetName, explain, command, connectGitHub } from './common.ts';
+import { CommandFailed, resetName, explain, command } from './common.ts';
 import { applyReset, readyToApply } from './apply-now.ts';
 import { saveRules, storedRules } from './rules.ts';
 import { openWorker } from './active-worker.ts';
@@ -17,25 +17,22 @@ import type { Overview, Tone as OverviewTone } from './overview.ts';
 import { readWorkerPage, renderWorker, itemLabel, POLL_MS, workerItems, FIRST_ACTION, journalHeight, journalWindow,
   captionHeight } from './worker-screen.ts';
 import type { WorkerPage, WorkerItem, Step, Unrolled } from './worker-screen.ts';
-import { trialRun } from './setup.ts';
 import { trialLine } from './setup-google.ts';
 import type { Trial } from './setup-google.ts';
 import { repairWorker } from './repair.ts';
 import { setWorkerPause } from './pause.ts';
 import { signInAgain, renewed } from './login.ts';
 import { connectGoogle, readSecret } from './google.ts';
-import { switchPlatform, finishSwitch, SwitchCancelled } from './switch.ts';
 import type { Keychain } from './keychain.ts';
 import type { OpenUrl, CopyText } from './browser.ts';
-import type { Mac } from './mac-check.ts';
+import type { Mac } from './common.ts';
 import { t, language, setLanguage } from './language.ts';
 
 // `aures` without a command: the overview of `status` with a cursor. Enter on a
 // reset applies it now after a «y», Enter on a rule switches it; both do what `apply-now` and
 // `rules` do. Tab opens the screen «Воркер» and goes back: there Enter signs an account in
-// again, checks the worker with a trial run, repairs it, pauses it or takes it off pause,
-// switches it to the other platform (Esc stops the switch until the old worker is quenched), and
-// the journal under it is polled while it is shown. l switches the language between English
+// again, checks the worker with a trial run, repairs it, pauses it or takes it off pause, and the
+// journal under it is polled while it is shown. l switches the language between English
 // and Russian and keeps the choice. Takes the whole terminal on its alternate screen; q gives
 // the terminal back as it was.
 const hint = (): string => t('↑↓ select · Enter apply · Tab worker · l language · r refresh · q quit',
@@ -96,8 +93,8 @@ const RUSSIAN: Record<string, string> = { н: 'y', й: 'q', к: 'r', о: 'j', л
 
 // What an action says: a line of a note, or of its message, in its tone.
 export type Note = (text: string, tone?: Tone) => void;
-// What the screen «Воркер» needs on top: the sign-ins it renews, the bundles «Починить» deploys
-// (null without a build) and reopen, which opens the worker again after a deploy on Google.
+// What the screen «Воркер» needs on top: the sign-ins it renews, the bundle «Починить» deploys
+// (null without a build) and reopen, which opens the worker again after a deploy.
 export interface ScreenOptions {
   worker: Worker;
   mac: Mac;
@@ -105,12 +102,10 @@ export interface ScreenOptions {
   now: () => number;
   sleep: Sleep;
   timeZone: string | undefined;
-  keychain: Keychain;
   googleKeychain: Keychain;
   secretKeychain: Keychain;
   open: OpenUrl;
   copy: CopyText;
-  workerSource: string | null;
   appsScriptSource: string | null;
   reopen: () => Promise<Worker>;
 }
@@ -156,7 +151,6 @@ export class Screen {
   steps: Step[] = []; // what the CLI did on the screen «Воркер», for its journal
   polling: Promise<void> | null = null; // the poll under way
   poller: ReturnType<typeof setInterval> | null = null;
-  stopSwitch: AbortController | null = null; // Esc stops the switch under way, until the old worker is quenched
   constructor(options: ScreenOptions) {
     const { worker, mac, fetch, now, sleep, timeZone } = options;
     this.options = options;
@@ -209,7 +203,7 @@ export class Screen {
     poll.answered ??= now();
     this.seeSchedule();
     // The actions change with the state the page read.
-    const last = workerItems(this.page).length - 1;
+    const last = workerItems().length - 1;
     this.workerCursor = Math.min(this.workerCursor, last);
     this.actionCursor = Math.min(this.actionCursor, last);
     this.syncJournal(before);
@@ -259,7 +253,7 @@ export class Screen {
         this.polling = null;
         this.changed();
       });
-    }, POLL_MS[this.worker.platform]);
+    }, POLL_MS);
     this.poller.unref?.();
   }
   stopPolling(): void {
@@ -285,7 +279,7 @@ export class Screen {
   captionView(): Unrolled | null {
     if (this.view !== 'worker' || !this.page) return null;
     if (!this.motion) {
-      const item = this.captionOpen() ? workerItems(this.page)[this.workerCursor] : undefined;
+      const item = this.captionOpen() ? workerItems()[this.workerCursor] : undefined;
       return item === undefined ? null : { item, rule: 1, lines: Infinity };
     }
     const unroll = this.unroll, now = this.now();
@@ -295,7 +289,7 @@ export class Screen {
       const lines = Math.max(0, unroll.from - steps);
       return lines ? { item: unroll.item, rule: 1, lines } : null;
     }
-    const height = captionHeight(unroll.item, this.page.platform, this.page.paused, this.width);
+    const height = captionHeight(unroll.item, this.page.paused, this.width);
     return { item: unroll.item, rule: Math.min(1, (now - unroll.at) / RULE_MS),
       lines: unroll.from <= height ? Math.min(height, unroll.from + steps) : Math.max(height, unroll.from - steps) };
   }
@@ -310,7 +304,7 @@ export class Screen {
     if (!this.motion) return false;
     const { unroll, poll, outcome, flashAt, page } = this;
     if (unroll && page && now - unroll.at <= RULE_MS + LINE_MS *
-      (Math.max(unroll.from, captionHeight(unroll.item, page.platform, page.paused, this.width)) + 1)) return true;
+      (Math.max(unroll.from, captionHeight(unroll.item, page.paused, this.width)) + 1)) return true;
     if (poll && this.view === 'worker' && (poll.answered === null ? now - poll.at <= STUCK_MS + STEP_MS :
       !poll.failed && now - poll.answered <= EXIT_MS)) return true;
     if (outcome && now - outcome.at <= (outcome.ok ? FLASH_MS : WARN_MS) || flashAt !== null && now - flashAt <= FLASH_MS) return true;
@@ -408,7 +402,7 @@ export class Screen {
   // between them. A frame taller than the terminal shows its top or its bottom there (issue 33).
   edge(): 'first' | 'last' | null {
     if (this.view === 'worker' && this.journal) return 'last';
-    const [at, count] = this.view === 'worker' ? [this.workerCursor, this.page ? workerItems(this.page).length : 0] :
+    const [at, count] = this.view === 'worker' ? [this.workerCursor, this.page ? workerItems().length : 0] :
       [this.cursor, this.model ? overviewItems(this.model).length : 0];
     return at === 0 ? 'first' : at === count - 1 ? 'last' : null;
   }
@@ -418,18 +412,13 @@ export class Screen {
     const sequence = key.sequence?.toLowerCase();
     const name = (sequence === undefined ? undefined : RUSSIAN[sequence]) ?? key.name;
     if (key.ctrl && name === 'c') return this.close();
-    if (this.busy) {
-      if (name === 'escape') this.stopSwitch?.abort();
-      return;
-    }
+    if (this.busy) return;
     if (this.confirm) {
       const creditId = this.confirm;
       this.confirm = null;
       if (name === 'y') {
         const name = resetName(creditId);
-        return this.act(this.worker.platform === 'google' ? t(`Applying ${name}…`, `Применяем ${name}…`) :
-          t(`Applying ${name}… The worker starts on GitHub, this takes a couple of minutes.`,
-            `Применяем ${name}… Воркер запускается на GitHub, это займёт пару минут.`), note => this.apply(creditId, note), { section: 'resets' });
+        return this.act(t(`Applying ${name}…`, `Применяем ${name}…`), note => this.apply(creditId, note), { section: 'resets' });
       }
       this.changed();
       return;
@@ -480,7 +469,7 @@ export class Screen {
   async pressOnWorker(name: string | undefined): Promise<undefined> {
     const page = this.page;
     if (!page) return;
-    const items = workerItems(page), count = items.length, item = items[this.workerCursor];
+    const items = workerItems(), count = items.length, item = items[this.workerCursor];
     const total = this.journalLines(page).length;
     const viewport = this.windowRows() - (page.failed ? 1 : 0);
     const bottom = Math.max(0, total - viewport);
@@ -536,22 +525,20 @@ export class Screen {
     this.caption = false;
     this.actionAt = null;
     this.unroll = null;
-    if (item === 'switch' || item === 'retry') return this.runSwitch(item);
     const paused = this.page?.paused === true;
-    const label = itemLabel(item, this.worker.platform, paused);
+    const label = itemLabel(item, paused);
     const busy = ({
-      platformAccount: this.worker.platform === 'github' ? t('Signing in to GitHub…', 'Входим в GitHub…') : t('Signing in to Google…', 'Входим в Google…'),
+      platformAccount: t('Signing in to Google…', 'Входим в Google…'),
       chatgpt: t('Signing the worker in to ChatGPT…', 'Входим в ChatGPT для воркера…'),
-      trial: this.worker.platform === 'github' ? t('Checking the worker: a trial run on GitHub, about a minute…',
-        'Проверяем воркер: пробный запуск на GitHub, около минуты…') : t('Checking the worker…', 'Проверяем воркер…'),
+      trial: t('Checking the worker…', 'Проверяем воркер…'),
       repair: t('Repairing the worker…', 'Чиним воркер…'),
       pause: paused ? t('Taking the worker off pause…', 'Снимаем воркер с паузы…') : t('Pausing the worker…', 'Ставим воркер на паузу…'),
-    } satisfies Record<Exclude<WorkerItem, 'switch' | 'retry'>, string>)[item];
-    const action = ({ platformAccount: io => this.signInPlatform(io), chatgpt: io => this.signInChatGPT(io), trial: io => this.trial(io),
+    } satisfies Record<WorkerItem, string>)[item];
+    const action = ({ platformAccount: io => this.signInPlatform(io), chatgpt: io => this.signInChatGPT(io), trial: () => this.trial(),
       repair: io => this.repair(io), pause: () => this.setPause(!paused) } satisfies
-      Record<Exclude<WorkerItem, 'switch' | 'retry'>, (io: Io) => Promise<string>>)[item];
+      Record<WorkerItem, (io: Io) => Promise<string>>)[item];
     // How long an action usually takes, for its bracket to fill; the sign-ins have no such time.
-    const expected = ({ trial: this.worker.platform === 'google' ? 4_000 : 60_000, repair: 15_000, pause: 3_000 } as
+    const expected = ({ trial: 4_000, repair: 15_000, pause: 3_000 } as
       Partial<Record<WorkerItem, number>>)[item] ?? null;
     return this.act(busy, async note => {
       // The lines of the commands are notes while it runs: device codes, what it waits for.
@@ -569,72 +556,17 @@ export class Screen {
     }, { section: 'worker', expected });
   }
 
-  // «Переключиться на …» and «Повторить переключение» (ADR-0007): each step of the switch goes
-  // into the journal as it happens. Esc stops the switch until the old worker is quenched; from
-  // then on the screen goes on with the worker on the new platform, which the install record names.
-  async runSwitch(item: 'switch' | 'retry'): Promise<undefined> {
-    const label = t('Switch', 'Переключение');
-    const stop = item === 'switch' ? new AbortController() : null;
-    // What the spinner line says: what the switch waits for, and Esc while it still stops the switch.
-    const show = (text: string) => {
-      this.busy = this.stopSwitch ? `${text} ${t('Esc — stop', 'Esc — отменить')}` : text;
-      this.changed();
-    };
-    const busy = stop ? t('Switching the platform…', 'Переключаем площадку…') : t('Finishing the switch…', 'Завершаем переключение…');
-    this.stopSwitch = stop;
-    const step = (text: string, tone: Step['tone'] = 'ok') => {
-      this.step(`${label}: ${text.split('\n').join(' ')}`, tone);
-      this.changed();
-    };
-    let moved = item === 'retry';
-    try {
-      await this.act(busy, async note => {
-        show(busy);
-        // The lines of the sign-ins are notes while they run: device codes, the pages to open.
-        const io: Io = { print: line => note(line), prompt: async () => { throw new Error('the screen asks no questions'); },
-          wait: text => show(text ?? busy) };
-        const { fetch, now, sleep, timeZone, mac, options: { keychain, googleKeychain, secretKeychain, open, copy, workerSource, appsScriptSource } } = this;
-        const common = { fetch, keychain, googleKeychain, secretKeychain, open, copy, io, mac, now, sleep, timeZone, journal: step };
-        try {
-          step(stop ? await switchPlatform({ ...common, worker: this.worker, workerSource, appsScriptSource, signal: stop.signal,
-            committed: () => {
-              moved = true;
-              this.stopSwitch = null;
-              show(t('Switching the platform: quenching the old worker…', 'Переключаем площадку: гасим старый воркер…'));
-            } }) : await finishSwitch(common));
-        } catch (error) {
-          if (error instanceof SwitchCancelled) step(t('stopped by Esc; the worker stays as it was, active, with its session.',
-            'отменено по Esc; воркер остался как был: активен, его сессия жива.'));
-          else {
-            const message = explain(error);
-            if (message === null) throw error;
-            step(message, 'warn');
-          }
-        }
-        this.notes = [];
-        // The record names the platform the switch got to: the screen goes on with that worker.
-        if (moved) {
-          this.worker = await this.options.reopen();
-          this.workerCursor = this.actionCursor = FIRST_ACTION;
-        }
-      }, { section: 'worker' });
-    } finally { this.stopSwitch = null; }
-    if (moved && this.view === 'worker') this.startPolling();
-  }
-
   // «Проверить сейчас»: the trial run, which reads the resets and applies nothing.
-  async trial(io: Io): Promise<string> {
-    const { worker, now, sleep, timeZone } = this;
-    if (worker.platform === 'google') return trialLine(await worker.ask('trial') as unknown as Trial, timeZone).line;
-    const paused = (await this.mac.files.readInstall())?.paused === true;
-    return (await trialRun({ api: worker.api, repo: worker.repo, io, now, sleep, timeZone, paused })).line;
+  async trial(): Promise<string> {
+    const { worker, timeZone } = this;
+    return trialLine(await worker.ask('trial') as unknown as Trial, timeZone).line;
   }
 
-  // «Починить»; on Google the screen goes on with the worker that answers to the new secret.
+  // «Починить»; the screen goes on with the worker that answers to the new secret.
   async repair(io: Io): Promise<string> {
-    const { fetch, googleKeychain, secretKeychain, open, workerSource, appsScriptSource, reopen } = this.options;
+    const { fetch, googleKeychain, secretKeychain, open, appsScriptSource, reopen } = this.options;
     const { worker, message } = await repairWorker({ worker: this.worker, fetch, googleKeychain, secretKeychain, io, open, mac: this.mac,
-      workerSource, appsScriptSource, reopen, now: this.now, sleep: this.sleep });
+      appsScriptSource, reopen, now: this.now, sleep: this.sleep });
     this.worker = worker;
     return message;
   }
@@ -653,21 +585,9 @@ export class Screen {
     return renewed();
   }
 
-  // «Войти заново» for GitHub or Google: a new sign-in of the CLI. On GitHub it must be the
-  // account of the worker repository; otherwise the sign-in before it is put back.
+  // «Войти заново» for Google: a new sign-in of the CLI.
   async signInPlatform(io: Io): Promise<string> {
-    const { fetch, now, sleep, worker, options: { keychain, googleKeychain, open, copy } } = this;
-    if (worker.platform === 'github') {
-      const before = await readSecret(keychain);
-      const { api, login } = await connectGitHub({ fetch, keychain, io, open, copy, now, sleep, fresh: true });
-      if (login !== worker.repo.owner.login) {
-        if (before) await keychain.write(before);
-        throw new CommandFailed(t(`This is the GitHub account ${login}, the worker is in ${worker.repo.owner.login}. Sign in to that one.`,
-          `Это аккаунт GitHub ${login}, а воркер в ${worker.repo.owner.login}. Войдите в него.`));
-      }
-      this.worker = { ...worker, api };
-      return t(`Signed in to GitHub as ${login}.`, `Вы вошли в GitHub как ${login}.`);
-    }
+    const { fetch, now, options: { googleKeychain, open } } = this;
     const before = await readSecret(googleKeychain);
     const was = (await this.mac.files.readInstall())?.accounts?.google;
     await connectGoogle({ fetch, keychain: googleKeychain, io, open, now, files: this.mac.files, fresh: true });
@@ -710,16 +630,16 @@ export class Screen {
 
   async apply(creditId: string, note: Note): Promise<void> {
     const { worker, now, sleep } = this;
-    const { before, paused } = await readyToApply(worker, this.mac.files);
+    const { before } = await readyToApply(worker);
     // The spinner line says what the run waits for; the reset stays named in it.
     const wait = (text: string | null) => { if (text) { this.busy = `${resetName(creditId)}: ${text}`; this.changed(); } };
-    const { code, message } = await applyReset({ worker, creditId, before, now, sleep, wait, paused });
+    const { code, message } = await applyReset({ worker, creditId, before, now, sleep, wait });
     note(message, code === 0 ? 'ok' : 'warn');
   }
 
   // Switches one rule in the rules as they are now, not as the screen last read them.
   async switchRule(rule: Rule, note: Note): Promise<void> {
-    const { worker, mac, fetch, now, sleep } = this;
+    const { worker } = this;
     const stored = await storedRules(worker), { current, broken } = stored;
     if (!current) {
       throw new CommandFailed(broken ? t(`The rules do not read (${broken}). Choose them again: \`aures rules\`.`,
@@ -728,8 +648,7 @@ export class Screen {
     }
     const chosen = { formatVersion: RULES_FORMAT_VERSION, beforeExpiry: current.beforeExpiry, weeklyAutoApply: current.weeklyAutoApply,
       [rule]: !current[rule] };
-    const { open, copy } = this.options;
-    await saveRules({ worker, stored, chosen, mac, fetch, io: { print: line => note(line) }, open, copy, now, sleep });
+    await saveRules({ stored, chosen, io: { print: line => note(line) } });
   }
 
   // The other language at once; it is kept for the next start, if this Mac lets it be written.
@@ -742,16 +661,16 @@ export class Screen {
 
 // The screen of an installed worker, read once. Before the screen opens the user may be asked
 // where the worker runs.
-// The bundles are those setup and upgrade deploy, for «Починить»; null or left out without a build.
-export type ScreenCommandOptions = OpenWorkerOptions & { workerSource?: string | null; appsScriptSource?: string | null };
+// The bundle is the one setup and upgrade deploy, for «Починить»; null or left out without a build.
+export type ScreenCommandOptions = OpenWorkerOptions & { appsScriptSource?: string | null };
 export async function openScreen(options: ScreenCommandOptions): Promise<Screen> {
-  const { fetch, mac, keychain, googleKeychain, secretKeychain, open, copy, workerSource = null, appsScriptSource = null, now = Date.now,
+  const { fetch, mac, googleKeychain, secretKeychain, open, copy, appsScriptSource = null, now = Date.now,
     sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), timeZone } = options;
   // Its doPost failures are told on the screen, where the user repeats the action.
   const reopen = () => openWorker(options, null);
   const worker = await reopen();
-  const screen = new Screen({ worker, mac, fetch, now, sleep, timeZone, keychain, googleKeychain, secretKeychain, open, copy, workerSource,
-    appsScriptSource, reopen });
+  const screen = new Screen({ worker, mac, fetch, now, sleep, timeZone, googleKeychain, secretKeychain, open, copy, appsScriptSource,
+    reopen });
   await screen.load();
   return screen;
 }

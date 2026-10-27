@@ -67,7 +67,7 @@ function sameSecret(given: unknown, expected: string): boolean {
   return difference === 0;
 }
 
-// The worker on Apps Script: the same tick as on GitHub, with state in Script Properties. A
+// The worker on Apps Script: the tick, with state in Script Properties. A
 // tick and every doPost that changes something run under the script lock. The tick throws when
 // only the user can help, so that Google mails them; a temporary failure waits for the next tick.
 export function appsScriptWorker({ gas, secret }: WorkerOptions): Worker {
@@ -133,7 +133,7 @@ export function appsScriptWorker({ gas, secret }: WorkerOptions): Worker {
   const scheduled = (g: AppsScript): boolean => g.ScriptApp.getProjectTriggers().some(t => t.getHandlerFunction() === TICK_FUNCTION);
 
   // Revokes the worker session in OpenAI; the state keeps it, and the next tick finds it lost.
-  // The quench of a switch keeps an application with an unknown outcome: under the lock, no tick
+  // With keepPending it keeps an application with an unknown outcome: under the lock, no tick
   // can start one between the CLI's last status and this revocation, so it refuses with pending.
   const revoke = (g: AppsScript, { keepPending = false } = {}): { outcome: 'revoked' | 'revoke_failed' | 'no_session' | 'pending';
     reason?: TransientReason; pending?: { creditId: string; reason: Pending['reason'] } } => {
@@ -178,8 +178,8 @@ export function appsScriptWorker({ gas, secret }: WorkerOptions): Worker {
     wake: { locked: true, act: g => view(runTick(g, 'mac')) },
     apply_now: { locked: true, act: (g, { creditId }) =>
       typeof creditId === 'string' && creditId ? view(runTick(g, 'apply_now', { applyNow: creditId })) : null },
-    // A worker without a schedule is not the active one yet (setup, a switch of platform), so
-    // its login spends nothing: it goes as a trial run.
+    // A worker without a schedule is not the active one yet (setup), so its login spends
+    // nothing: it goes as a trial run.
     login: { locked: true, act: (g, request) => {
       const login = readLogin(JSON.stringify(request.login ?? null));
       return login && view(runTick(g, 'login', { login, trial: !scheduled(g) }));

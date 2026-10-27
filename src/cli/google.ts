@@ -1,5 +1,5 @@
 // The Google sign-in of the CLI and the deploy of the worker to Apps Script: what setup,
-// upgrade, «Починить» and the switch of platform share (ADR-0007).
+// upgrade and «Починить» share (ADR-0007).
 import { randomBytes } from 'node:crypto';
 import pkg from '../../package.json' with { type: 'json' };
 import { GoogleApi, GoogleFailure, ScopesMissing, googleLogin, postWorker } from '../google/api.ts';

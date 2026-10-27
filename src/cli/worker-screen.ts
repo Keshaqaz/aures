@@ -3,15 +3,14 @@
 // the cursor stands on, and the live journal — when a run started, who started it and what it
 // came to — in a window of its own, as tall as the screen of the resets. The page keeps what it
 // read and is worded when drawn, as the overview, so the language changes on the spot.
-import type { Platform, Accounts, Switching } from './watch-files.ts';
+import type { Accounts } from './watch-files.ts';
 import { readJournal } from './journal.ts';
 import type { Journal, JournalEntry, JournalKind } from './journal.ts';
 import { projectUrl } from './active-worker.ts';
 import type { Worker } from './active-worker.ts';
-import type { Mac } from './mac-check.ts';
+import type { Mac } from './common.ts';
 import { resetName, reasonText } from './common.ts';
-import { otherPlatform, platformName } from './switch.ts';
-import { shortTime, railed, S, WIDTH } from './overview.ts';
+import { shortTime, railed, S, WIDTH, PLATFORM_NAME } from './overview.ts';
 import type { Segment, Tone } from './overview.ts';
 import type { Summary } from '../worker/summary.ts';
 import { fit } from './fit.ts';
@@ -21,14 +20,13 @@ import type { Fetch } from '../chatgpt/http.ts';
 import { KeychainUnavailable } from './keychain.ts';
 import type { Keychain } from './keychain.ts';
 
-// While the screen is open the worker is polled this often: Google answers in a second, GitHub
-// counts every listing against its API limit.
-export const POLL_MS: Record<Platform, number> = { google: 30_000, github: 60_000 };
+// While the screen is open the worker is polled this often: Google answers in a second.
+export const POLL_MS = 30_000;
 const TONES: Record<Tone, string> = { ok: S.green, warn: S.yellow, bad: S.red };
 // The lines of the screen besides its journal window: the header with its rule and the blank
 // under them, the bracket of the section «ВОРКЕР» without a caption, the blank between the
-// sections and the heading and the corner of the journal. An unfinished switch adds one more,
-// which the height may take; an open caption adds as many as its text needs.
+// sections and the heading and the corner of the journal. An open caption adds as many as its
+// text needs.
 const FIXED_LINES = 14;
 
 // The rows of the journal window: the body of the screen «Воркер» is as tall as the body of the
@@ -41,16 +39,13 @@ export interface Step { at: number; text: string; tone: Tone }
 // What the screen read: the record of this Mac and the journal of the worker, or why the last
 // poll did not get it.
 export interface WorkerPage {
-  platform: Platform;
   link: string;
   paused: boolean;
-  // A switch of platform that has not finished: no worker is active (ADR-0007).
-  switching: Switching | null;
-  // The GitHub login; on Google, the email of the Google account if a sign-in gave it.
+  // The email of the Google account if a sign-in gave it.
   account: string | null;
   accounts: Accounts;
   // Whether Google still takes the sign-in of the CLI: false when it is gone (revoked or expired)
-  // or there is none; null on GitHub, or when the Keychain or Google did not answer.
+  // or there is none; null when the Keychain or Google did not answer.
   googleSignIn: boolean | null;
   journal: Journal | null;
   polledAt: number;
@@ -61,11 +56,8 @@ export interface WorkerPageOptions { worker: Worker; mac: Mac; now: () => number
 export async function readWorkerPage({ worker, mac, now, fetch, googleKeychain }: WorkerPageOptions): Promise<WorkerPage> {
   const install = await mac.files.readInstall();
   const accounts = install?.accounts ?? {};
-  const page = { platform: worker.platform, paused: install?.paused === true, switching: install?.switching ?? null, accounts,
-    link: worker.platform === 'github' ? worker.repo.html_url : projectUrl(worker.scriptId),
-    account: worker.platform === 'github' ? worker.repo.owner.login : accounts.google ?? null };
-  const [journal, googleSignIn] = await Promise.all([readJournal(worker, { now }),
-    worker.platform === 'google' ? checkGoogleSignIn({ fetch, now, keychain: googleKeychain }) : null]);
+  const page = { paused: install?.paused === true, accounts, link: projectUrl(worker.scriptId), account: accounts.google ?? null };
+  const [journal, googleSignIn] = await Promise.all([readJournal(worker, { now }), checkGoogleSignIn({ fetch, now, keychain: googleKeychain })]);
   return { ...page, googleSignIn, journal, polledAt: now(), failed: null };
 }
 
@@ -82,59 +74,37 @@ async function checkGoogleSignIn({ fetch, now, keychain }: { fetch: Fetch; now: 
   } catch (error) { return error instanceof GoogleFailure && error.reason === 'invalid_grant' ? false : null; }
 }
 
-// The cursor stands on the accounts, then on the actions; it opens on the first action. A worker
-// on pause is not switched from: it is taken off pause first. While a switch is unfinished the
-// only action is to finish it: everything else would run or schedule a worker that is not active.
-export type WorkerItem = 'platformAccount' | 'chatgpt' | 'trial' | 'repair' | 'pause' | 'switch' | 'retry';
+// The cursor stands on the accounts, then on the actions; it opens on the first action.
+export type WorkerItem = 'platformAccount' | 'chatgpt' | 'trial' | 'repair' | 'pause';
 const ACCOUNT_ITEMS: WorkerItem[] = ['platformAccount', 'chatgpt'];
-export const workerItems = ({ paused, switching }: Pick<WorkerPage, 'paused' | 'switching'>): WorkerItem[] => [...ACCOUNT_ITEMS,
-  ...switching ? ['retry' as const] : paused ? ['trial', 'repair', 'pause'] as const : ['trial', 'repair', 'pause', 'switch'] as const];
+export const workerItems = (): WorkerItem[] => [...ACCOUNT_ITEMS, 'trial', 'repair', 'pause'];
 export const FIRST_ACTION = ACCOUNT_ITEMS.length;
 
-export { platformName };
-export const itemLabel = (item: WorkerItem, platform: Platform, paused: boolean): string => ({
-  platformAccount: platform === 'github' ? 'GitHub' : 'Google',
+export const itemLabel = (item: WorkerItem, paused: boolean): string => ({
+  platformAccount: 'Google',
   chatgpt: 'ChatGPT',
   trial: t('Check now', 'Проверить сейчас'),
   repair: t('Repair', 'Починить'),
   // The one of the two pause actions that applies to the state the page read.
   pause: paused ? t('Unpause', 'Снять с паузы') : t('Pause', 'Пауза'),
-  switch: t(`Switch to ${platformName(otherPlatform(platform))}`, `Переключиться на ${platformName(otherPlatform(platform))}`),
-  retry: t('Retry the switch', 'Повторить переключение'),
 })[item];
-export const repairCaption = (): string => t('Deploy the current version of the worker again and bring its schedule back on this platform. ' +
+export const repairCaption = (): string => t('Deploy the current version of the worker again and bring its schedule back. ' +
   'The resets, the rules, the ChatGPT sign-in and the journal are not touched. Helps when the worker stopped running or its files were ' +
   'changed by hand',
-'Заново залить текущую версию воркера и вернуть расписание на этой площадке. Сбросы, правила, вход в ChatGPT и журнал не трогаются. ' +
+'Заново залить текущую версию воркера и вернуть расписание. Сбросы, правила, вход в ChatGPT и журнал не трогаются. ' +
   'Поможет, если воркер перестал запускаться или его файлы меняли вручную');
 
-export const switchCaption = (platform: Platform): string => t(`The worker on ${platformName(otherPlatform(platform))} is prepared ` +
-  'without a schedule while this one keeps working: you sign it in to ChatGPT, the rules move with it. Then this worker is quenched ' +
-  '(its schedule off, its ChatGPT session revoked, the ' + (platform === 'github' ? 'repository' : 'project') + ' kept) and the new one gets ' +
-  'its schedule. Esc stops the switch until the quench and leaves this worker as it is',
-`Воркер на ${platformName(otherPlatform(platform))} готовится без расписания, пока этот работает: вы входите для него в ChatGPT, ` +
-  'правила переезжают с ним. Затем этот воркер гасится (расписание снято, сессия ChatGPT отозвана, ' +
-  (platform === 'github' ? 'репозиторий' : 'проект') + ' сохранён), и у нового включается расписание. Esc до гашения отменяет ' +
-  'переключение и оставляет этот воркер как есть');
-
-export const trialCaption = (platform: Platform): string => t('A trial run: the worker reads the limits and the resets and shows what ' +
-  'the rules would do. Applies nothing.' + (platform === 'github' ? ' On GitHub it takes about a minute.' : ''),
-'Пробный запуск: воркер читает квоты и сбросы и показывает, что сделали бы правила. Ничего не применяет.' +
-  (platform === 'github' ? ' На GitHub — около минуты.' : ''));
+export const trialCaption = (): string => t('A trial run: the worker reads the limits and the resets and shows what ' +
+  'the rules would do. Applies nothing.',
+'Пробный запуск: воркер читает квоты и сбросы и показывает, что сделали бы правила. Ничего не применяет.');
 export const pauseCaption = (): string => t('Turn the schedule off: the rules stop applying resets, each burns at its deadline. ' +
   '«Apply now» still works.',
 'Снять расписание: правила перестают применять сбросы, каждый сгорит в свой срок. «Применить сейчас» продолжает работать.');
 export const unpauseCaption = (): string => t('Turn the schedule back on: the worker applies resets by the rules again.',
   'Вернуть расписание: воркер снова применяет сбросы по правилам.');
-export const retryCaption = (): string => t('Finish the switch: the new worker gets its schedule, the old one is quenched. Until it is ' +
-  'finished no worker is active and resets are not applied.',
-'Довести переключение до конца: новый воркер получает расписание, прежний гасится. Пока оно не завершено, активного воркера нет и ' +
-  'сбросы не применяются.');
-
 // The caption of an action of the row (issue 03): every one of them has one.
-export const itemCaption = (item: Exclude<WorkerItem, 'platformAccount' | 'chatgpt'>, platform: Platform, paused: boolean): string =>
-  ({ trial: trialCaption(platform), repair: repairCaption(), pause: paused ? unpauseCaption() : pauseCaption(),
-    switch: switchCaption(platform), retry: retryCaption() })[item];
+export const itemCaption = (item: Exclude<WorkerItem, 'platformAccount' | 'chatgpt'>, paused: boolean): string =>
+  ({ trial: trialCaption(), repair: repairCaption(), pause: paused ? unpauseCaption() : pauseCaption() })[item];
 
 // The caption of an action folded to lines no longer than width: what it does up front, in the
 // plain colour, and the details after, dim.
@@ -161,19 +131,15 @@ function captionLines(text: string, width: number): Segment[][] {
 
 // How many lines the text of a caption takes at a width of the screen: the caption unrolls line
 // by line up to it (issue 04).
-export const captionHeight = (item: WorkerItem, platform: Platform, paused: boolean, width = WIDTH): number =>
-  item === 'platformAccount' || item === 'chatgpt' ? 0 : captionLines(itemCaption(item, platform, paused), width - 4).length;
+export const captionHeight = (item: WorkerItem, paused: boolean, width = WIDTH): number =>
+  item === 'platformAccount' || item === 'chatgpt' ? 0 : captionLines(itemCaption(item, paused), width - 4).length;
 
-// The worker in the heading of its section: the label beside the dot on the right, the detail as
-// the first line of the section when the state has one (issue 03). failed: the overview says the
-// last run failed (issue 04).
-function pageState({ paused, switching }: Pick<WorkerPage, 'paused' | 'switching'>, failed: boolean):
-  { tone: Tone; label: string; detail: string | null } {
-  if (switching) return { tone: 'bad', label: t('no active worker', 'нет активного воркера'),
-    detail: t('the switch is not finished', 'переключение не завершено') };
-  if (paused) return { tone: 'warn', label: t('paused', 'на паузе'), detail: null };
-  if (failed) return { tone: 'bad', label: t('last run failed', 'ошибка запуска'), detail: null };
-  return { tone: 'ok', label: t('active', 'активен'), detail: null };
+// The worker in the heading of its section: the label beside the dot on the right (issue 03).
+// failed: the overview says the last run failed (issue 04).
+function pageState({ paused }: Pick<WorkerPage, 'paused'>, failed: boolean): { tone: Tone; label: string } {
+  if (paused) return { tone: 'warn', label: t('paused', 'на паузе') };
+  if (failed) return { tone: 'bad', label: t('last run failed', 'ошибка запуска') };
+  return { tone: 'ok', label: t('active', 'активен') };
 }
 
 // «1 проверка, 3 проверки, 5 проверок, 21 проверка» — the Russian word by the count.
@@ -334,7 +300,7 @@ export interface WorkerRenderOptions { timeZone?: string; width?: number; cursor
 export function renderWorker(page: WorkerPage, { timeZone, width = WIDTH, cursor, steps, header, rule = [['─'.repeat(width), S.dim]], now,
   rows, offset = 0, focus = false, caption = false, lastApplied = null, failed = false }: WorkerRenderOptions): Segment[][] {
   const lines: Segment[][] = [header, rule, []];
-  const items = workerItems(page);
+  const items = workerItems();
   const selected = (item: WorkerItem) => items[cursor] === item;
   // With the cursor in the journal neither the accounts nor the row of actions point anywhere.
   const chosen = (item: WorkerItem): boolean => !focus && selected(item);
@@ -343,9 +309,8 @@ export function renderWorker(page: WorkerPage, { timeZone, width = WIDTH, cursor
   // The section «ВОРКЕР»: the state on the right of the heading, the link, the accounts and the
   // actions in one row, the caption of the action under the cursor, all in one bracket.
   const state = pageState(page, failed), heading = lines.length;
-  lines.push(spread([['╭─ ', S.dim], [t('WORKER', 'ВОРКЕР'), S.bold], [` · ${platformName(page.platform)}`, S.dim]],
+  lines.push(spread([['╭─ ', S.dim], [t('WORKER', 'ВОРКЕР'), S.bold], [` · ${PLATFORM_NAME}`, S.dim]],
     [['● ', TONES[state.tone]], [state.label, TONES[state.tone]]], width));
-  if (state.detail) lines.push([rail(), [state.detail, TONES[state.tone]]]);
   lines.push([rail(), [page.link, S.dim]], [['│', S.dim]]);
 
   const entries = page.journal?.entries ?? [];
@@ -357,10 +322,10 @@ export function renderWorker(page: WorkerPage, { timeZone, width = WIDTH, cursor
       ...page.googleSignIn === null ? [] : signIn(!page.googleSignIn)]],
     ['chatgpt', [[page.accounts.chatgpt ?? unknown, page.accounts.chatgpt ? '' : S.dim], ...signIn(sessionLost(entries))]],
   ];
-  const labelWidth = Math.max(...accounts.map(([item]) => len(itemLabel(item, page.platform, page.paused)))) + 3;
+  const labelWidth = Math.max(...accounts.map(([item]) => len(itemLabel(item, page.paused)))) + 3;
   for (const [item, value] of accounts) {
     const on = chosen(item);
-    lines.push(spread([rail(on), [itemLabel(item, page.platform, page.paused).padEnd(labelWidth), on ? S.cyan : ''], ...value],
+    lines.push(spread([rail(on), [itemLabel(item, page.paused).padEnd(labelWidth), on ? S.cyan : ''], ...value],
       [[t('sign in again', 'войти заново'), on ? S.cyan : S.dim]], width));
   }
   lines.push([['│', S.dim]]);
@@ -368,7 +333,7 @@ export function renderWorker(page: WorkerPage, { timeZone, width = WIDTH, cursor
   // The actions in one row: three spaces between the labels — two when the row does not fit —
   // the chosen one in cyan, the rail heavy while the cursor walks the row.
   const actions = items.slice(FIRST_ACTION);
-  const labels = actions.map(item => itemLabel(item, page.platform, page.paused));
+  const labels = actions.map(item => itemLabel(item, page.paused));
   const gap = 2 + labels.reduce((n, label) => n + len(label), 0) + 3 * (labels.length - 1) <= width ? '   ' : '  ';
   const starts: number[] = [];
   const row: Segment[] = [];
@@ -388,11 +353,11 @@ export function renderWorker(page: WorkerPage, { timeZone, width = WIDTH, cursor
   if (unrolled && item !== undefined && item !== 'platformAccount' && item !== 'chatgpt' && items.includes(item)) {
     const at = items.indexOf(item) - FIRST_ACTION, label = labels[at] ?? '', drawn = Math.round(len(label) * unrolled.rule);
     lines.push([rail(), [' '.repeat(Math.max(0, (starts[at] ?? 2) - 2)), ''], ['━'.repeat(drawn), S.cyan], ['╍'.repeat(len(label) - drawn), S.dim]]);
-    for (const line of captionLines(itemCaption(item, page.platform, page.paused), width - 4).slice(0, unrolled.lines))
+    for (const line of captionLines(itemCaption(item, page.paused), width - 4).slice(0, unrolled.lines))
       lines.push([rail(), ['  ', ''], ...line]);
   }
   lines.push([['╰─', S.dim]]);
-  railed(lines, heading, page.switching ? 'broken' : page.paused ? 'dashed' : 'solid');
+  railed(lines, heading, page.paused ? 'dashed' : 'solid');
   lines.push([]);
 
   // The section «ЖУРНАЛ»: the poll on the right of its heading, its window on the rail — the

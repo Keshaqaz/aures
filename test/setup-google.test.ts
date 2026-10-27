@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { setup } from '../src/cli/setup.ts';
 import { credit } from './support/fake-world.ts';
-import { cliWorld } from './support/cli-world.ts';
+import { cliWorld, terminal } from './support/cli-world.ts';
 import type { CliWorld, RunOptions } from './support/cli-world.ts';
 import { USER_SETTINGS } from './support/fake-google.ts';
 import type { FakeProject } from './support/fake-google.ts';
@@ -16,8 +16,8 @@ const EVERY_5 = 'Воркер работает по расписанию каж�
 
 async function googleWorld() {
   const cli = await cliWorld();
-  // On Google the rules are set without a question (issue 24), so the platform is the only answer.
-  return { ...cli, run: ({ answers = ['2'], ...rest }: RunOptions = {}) => cli.run(setup, { answers, ...rest }) };
+  // The rules are set without a question (issue 24) and the platform is not asked (ADR-0009).
+  return { ...cli, run: ({ answers = [], ...rest }: RunOptions = {}) => cli.run(setup, { answers, ...rest }) };
 }
 const deployed = ({ world }: Pick<CliWorld, 'world'>): FakeProject => {
   const project = world.google.project();
@@ -37,33 +37,25 @@ test('setup on Google goes from nothing to a scheduled worker and ends with a tr
   const { code, io } = await cli.run();
   assert.equal(code, 0, io.output());
 
-  // Both platforms are named, shortly (issue 30), none is recommended.
-  assert.match(io.output(), /1\. GitHub Actions — раз в час, GitHub пропускает многие запуски\./);
-  assert.match(io.output(), /2\. Google Apps Script — каждые 5 минут\./);
-  assert.doesNotMatch(io.output(), /рекоменд/i);
+  // No platform is asked: there is one (ADR-0009).
+  assert.deepEqual(io.asked, []);
   // The stages of issue 30: each says what it does and why, its steps ✓ under it; the one
   // switch of the Apps Script API is told at once, as what the user does in the worker's stage.
   assert.deepEqual(io.lines, [
-    'Воркер — небольшая программа в облаке, которая сама применяет сбросы. Где ему работать:',
-    '  1. GitHub Actions — раз в час, GitHub пропускает многие запуски.',
-    '  2. Google Apps Script — каждые 5 минут.',
-    'Введите 1 или 2: ',
-    '',
-    '[1/5] Площадка: Google Apps Script',
-    '[2/5] Вход в Google',
+    '[1/4] Вход в Google',
     '      чтобы создать проект воркера в вашем аккаунте Google',
     '      ✓ owner@example.invalid',
-    '[3/5] Воркер в Google',
+    '[2/4] Воркер в Google',
     '      проект Apps Script в вашем аккаунте: в нём воркер и работает',
     `      → Включите API скрипта: ${USER_SETTINGS}, строка «API скрипта приложений Google Apps» → переключатель`,
     '      ✓ API скрипта включён',
     '      ✓ проект aures-worker: код загружен',
     '      ✓ скрипту разрешено работать',
-    '[4/5] Вход в ChatGPT',
+    '[3/4] Вход в ChatGPT',
     '      у воркера своя сессия ChatGPT: через неё он видит и применяет сбросы',
     '      → код FAKE-1000 (скопирован): подтвердите его в открывшемся браузере',
     '      ✓ fake@example.invalid',
-    '[5/5] Первый запуск',
+    '[4/4] Первый запуск',
     '      расписание каждые 5 минут и пробная проверка, которая ничего не тратит',
     '      ✓ расписание включено',
     '      ✓ пробная проверка прошла',
@@ -76,7 +68,7 @@ test('setup on Google goes from nothing to a scheduled worker and ends with a tr
     /Если браузер не открылся|«Продолжить»|Review permissions|Разрешите скрипту|два предупреждения|Правила: /);
   // The rules go in without a question (issue 24): the platform is the only prompt, the worker
   // gets both rules on.
-  assert.deepEqual(io.asked, ['Введите 1 или 2: ']);
+  assert.deepEqual(io.asked, []);
   assert.doesNotMatch(io.output(), /Когда применять сбросы/);
 
   const project = deployed(cli);
@@ -96,15 +88,14 @@ test('setup on Google goes from nothing to a scheduled worker and ends with a tr
   assert.deepEqual(await mac.files.readInstall(), { platform: 'google', google: { scriptId: project.scriptId, deploymentId, url },
     accounts: { google: 'owner@example.invalid', chatgpt: 'fake@example.invalid' } });
   assert.equal(world.google.deployedSecret(), await cli.secretKeychain.read());
-  assert.equal(world.github.requests.length, 0, 'GitHub is not touched');
-  assert.equal(mac.launchctl.calls.length, 0, 'the weekly rule needs no check from this Mac on Google');
+  assert.equal(mac.launchctl.calls.length, 0, 'the weekly rule needs no check from this Mac');
   noViolations(cli);
 });
 
 test('a repeated setup on Google finds the project and keeps its state, rules and schedule, without new sign-ins', async () => {
   const cli = await googleWorld();
   const { world } = cli;
-  await cli.run({ answers: ['2'] });
+  await cli.run();
   const project = deployed(cli);
   const before = new Map(project.gas?.properties);
   const versions = project.versions.length;
@@ -120,9 +111,9 @@ test('a repeated setup on Google finds the project and keeps its state, rules an
   assert.equal(world.google.requests.slice(requests).filter(r => !r.url.includes('/macros/')).length, 0, 'no Google sign-in or API call');
   assert.doesNotMatch(io.output(), /auth\.openai\.com|не проверял/);
   // Everything is there: each stage is done at once (issue 30).
-  assert.match(io.output(), /\[3\/5\] Воркер в Google\n.*\n {6}✓ уже на месте\n/);
-  assert.match(io.output(), /\[4\/5\] Вход в ChatGPT\n.*\n {6}✓ уже есть\n/);
-  assert.match(io.output(), /\[5\/5\] Первый запуск\n.*\n {6}✓ расписание уже включено\n/);
+  assert.match(io.output(), /\[2\/4\] Воркер в Google\n.*\n {6}✓ уже на месте\n/);
+  assert.match(io.output(), /\[3\/4\] Вход в ChatGPT\n.*\n {6}✓ уже есть\n/);
+  assert.match(io.output(), /\[4\/4\] Первый запуск\n.*\n {6}✓ расписание уже включено\n/);
   assert.equal(project.gas?.properties.get('rules'), before.get('rules'));
   const state = property(project, 'state') as { session: { refreshToken: string } };
   assert.equal(state.session.refreshToken, world.auth.sessions[0]?.refresh);
@@ -151,7 +142,7 @@ test('setup stopped while the script waits to be allowed goes on with the consen
   assert.equal(project.versions.length, 1, 'the deployed version is kept');
   assert.equal(world.google.opened.filter(href => href.startsWith(GOOGLE_LOGIN)).length, 1, 'one Google sign-in');
   assert.equal(await googleKeychain.read(), token);
-  assert.match(io.output(), /\[3\/5\] Воркер в Google\n.*\n {6}✓ скрипту разрешено работать\n/);
+  assert.match(io.output(), /\[2\/4\] Воркер в Google\n.*\n {6}✓ скрипту разрешено работать\n/);
   // A quick consent sees no buttons and no page address (issue 30); the reopen itself is the tell.
   assert.doesNotMatch(io.output(), /Разрешите скрипту|Review permissions/);
   assert.deepEqual(project.gas?.triggers, [{ handler: 'tick', minutes: 5 }]);
@@ -316,7 +307,7 @@ test('a worker that does not know the secret in the Keychain is deployed again u
   assert.notEqual(fresh, old);
   assert.equal(world.google.deployedSecret(), fresh);
   assert.equal(deployed(cli).versions.length, 2);
-  assert.match(io.output(), /\[4\/5\] Вход в ChatGPT\n.*\n {6}✓ уже есть\n/);
+  assert.match(io.output(), /\[3\/4\] Вход в ChatGPT\n.*\n {6}✓ уже есть\n/);
   noViolations(cli);
 });
 
@@ -354,15 +345,53 @@ test('a web app that keeps answering with the previous version past the minute i
   noViolations(cli);
 });
 
-test('the platform asked again until the answer is 1 or 2, and GitHub keeps its own path', async () => {
+test('a record of the removed GitHub platform counts as no install: setup deploys on Google and writes the record anew', async () => {
   const cli = await googleWorld();
-  const { code, io } = await cli.run({ answers: ['3', '', '1', ''] });
+  await cli.mac.files.write('install.json', { platform: 'github', accounts: { chatgpt: 'fake@example.invalid' } });
+  const { code, io } = await cli.run();
   assert.equal(code, 0, io.output());
-  assert.equal(io.asked.filter(question => question === 'Введите 1 или 2: ').length, 3);
-  assert.deepEqual(await cli.mac.files.readInstall(), { platform: 'github', accounts: { chatgpt: 'fake@example.invalid' } });
-  assert.ok(cli.world.github.repo());
-  assert.equal(cli.world.google.requests.length, 0);
-  assert.match(io.output(), /Перед истечением \(в последние 8 часов\)/);
+  const project = deployed(cli);
+  const [deploymentId] = [...project.deployments.keys()];
+  const url = `https://script.google.com/macros/s/${deploymentId}/exec`;
+  assert.deepEqual(await cli.mac.files.readInstall(), { platform: 'google', google: { scriptId: project.scriptId, deploymentId, url },
+    accounts: { google: 'owner@example.invalid', chatgpt: 'fake@example.invalid' } });
+  noViolations(cli);
+});
+
+test('setup in English goes in the same four stages, with no question about the platform', async () => {
+  const cli = await cliWorld({ language: 'en' });
+  const { code, io } = await cli.run(setup);
+  assert.equal(code, 0, io.output());
+  assert.deepEqual(io.asked, []);
+  assert.deepEqual(io.lines.filter(line => /^\[\d\/\d\]/.test(line)),
+    ['[1/4] Signing in to Google', '[2/4] The worker on Google', '[3/4] Signing in to ChatGPT', '[4/4] First run']);
+});
+
+test('a successful setup opens the screen when the terminal asks for it; a failure does not', async () => {
+  const cli = await googleWorld();
+  const io = terminal(cli.world);
+  const seenAtHandOver: string[] = [];
+  const { code } = await cli.run({ io, openScreen: async () => { seenAtHandOver.push(io.lines.at(-1) ?? ''); return 0; } });
+  assert.equal(code, 0, io.output());
+  // The hand-over is setup's last step: by then the done line and its own telling are said.
+  assert.deepEqual(seenAtHandOver, ['Открываю aures…']);
+  assert.equal(io.lines.at(-2), `Готово. Сбросов: 2. ${EVERY_5}`);
+  assert.equal(io.lines.at(-1), 'Открываю aures…');
+
+  // Outside a terminal nothing is handed over: the done line is the last one.
+  const plain = await googleWorld();
+  const done = await plain.run();
+  assert.equal(done.code, 0, done.io.output());
+  assert.equal(done.io.lines.at(-1), `Готово. Сбросов: 2. ${EVERY_5}`);
+
+  // A failed setup never opens it.
+  const failing = await googleWorld();
+  const never: string[] = [];
+  const failed = await failing.run({ fetch: async () => { throw new TypeError('fetch failed'); },
+    openScreen: async () => { never.push('screen'); return 0; } });
+  assert.equal(failed.code, 1);
+  assert.deepEqual(never, []);
+  assert.doesNotMatch(failed.io.output(), /Открываю aures/);
 });
 
 // ─── The deferred hints of issue 30 ────────────────────────────────────────────
@@ -438,7 +467,7 @@ test('a slow user at the ChatGPT code gets the address as one line', async () =>
       if (code && seen.code === null) { seen.code = code[0]; seen.at = world.now; }
     },
     wait: () => {},
-    prompt: async (question: string) => { asked.push(question); lines.push(question); return '2'; },
+    prompt: async (question: string) => { asked.push(question); lines.push(question); return ''; },
   };
   const sleep = async (ms: number) => {
     world.advance(ms);
@@ -454,8 +483,8 @@ test('a slow user at the ChatGPT code gets the address as one line', async () =>
   const hints = lines.filter(line => line.includes('Если браузер не открылся: https://auth.openai.com/codex/device'));
   assert.equal(hints.length, 1, lines.join('\n'));
   // The code is there from the first moment, the address after the wait.
-  const stage = lines.indexOf('[4/5] Вход в ChatGPT');
+  const stage = lines.indexOf('[3/4] Вход в ChatGPT');
   assert.match(lines[stage + 2] ?? '', /^ {6}→ код FAKE-\d+ \(скопирован\): подтвердите его в открывшемся браузере$/);
   assert.equal(lines.indexOf(hints[0] ?? ''), stage + 3);
-  assert.deepEqual(asked, ['Введите 1 или 2: ']);
+  assert.deepEqual(asked, []);
 });

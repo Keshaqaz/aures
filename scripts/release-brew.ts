@@ -1,6 +1,6 @@
 // Builds the Homebrew release: the archive for the GitHub Release and the formula for the tap.
-// The archive is `npm pack` of this package: `prepack` checks types and builds dist/worker.mjs, and
-// bundleDependencies put libsodium inside, so `brew install` needs no npm and no network.
+// The archive is `npm pack` of this package: `prepack` checks types and builds the worker for Apps
+// Script. The CLI has no runtime dependencies, so `brew install` needs no npm and no network.
 // Release steps: docs/releasing.md.
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
@@ -21,7 +21,7 @@ export function formula({ version, sha256 }: { version: string; sha256: string }
   if (!/^[0-9]+\.[0-9]+\.[0-9]+$/.test(version)) throw new RangeError(`invalid version: ${version}`);
   if (!/^[0-9a-f]{64}$/.test(sha256)) throw new RangeError(`invalid sha256: ${sha256}`);
   return `class Aures < Formula
-  desc "Applies ChatGPT Codex resets from your own GitHub or Google Apps Script worker"
+  desc "Applies ChatGPT Codex resets from your own Google Apps Script worker"
   homepage "${REPOSITORY}"
   url "${releaseUrl(version)}"
   sha256 "${sha256}"

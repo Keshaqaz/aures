@@ -18,7 +18,7 @@ import { CommandFailed, failedRunAdvice, trialVerdict, workingLine, notReadYet, 
 import type { Io, Sleep } from './common.ts';
 import type { SetupOptions } from './setup.ts';
 import type { GoogleWorker } from './watch-files.ts';
-import type { RunOutcome } from '../worker/run.ts';
+import type { RunOutcome } from '../apps-script/worker.ts';
 import { t } from './language.ts';
 
 // Until the script answers as authorized the CLI asks again this often.
@@ -68,9 +68,8 @@ export function trialLine({ outcome, reason, wouldApply, summary }: Trial, timeZ
 
 export async function setupGoogle({ fetch, io, mac: { files }, open, copy, googleKeychain, secretKeychain, appsScriptSource, now, sleep, timeZone,
   paused, stages }: SetupOptions & { now: () => number; sleep: Sleep; paused: boolean; stages: Stages }): Promise<number> {
-  // The record keeps a pause through the repair: the schedule is not brought back and the
-  // passes from this Mac keep not waking the worker.
-  // The accounts the sign-ins named stay with it.
+  // The record keeps a pause through the repair: the schedule is not brought back. The
+  // accounts the sign-ins named stay with it.
   const remember = async (google: GoogleWorker) => {
     const accounts = (await files.readInstall())?.accounts;
     await files.writeInstall({ platform: 'google', google, ...paused ? { paused: true } : {}, ...accounts ? { accounts } : {} });
@@ -116,7 +115,7 @@ export async function setupGoogle({ fetch, io, mac: { files }, open, copy, googl
   // What the worker is asked prints under the stage that asks.
   let stageIo: Io = io;
 
-  // Stage 2: the sign-in of the CLI to Google — only when the worker needs one (issue 30); a
+  // Stage 1: the sign-in of the CLI to Google — only when the worker needs one (issue 30); a
   // deployed worker that answers leaves the stage done at once.
   const account = async (): Promise<string | undefined> => (await files.readInstall())?.accounts?.google ?? undefined;
   const known = Boolean(google?.url && google.deploymentId && secret);
@@ -139,7 +138,7 @@ export async function setupGoogle({ fetch, io, mac: { files }, open, copy, googl
   // The account the sign-in named; a grant without the email is a sign-in all the same.
   signIn.done(await account() ?? (api ? t('signed in', 'вход выполнен') : t('already there', 'уже есть')));
 
-  // Stage 3: the worker on Google — the deploy, the switch of the Apps Script API, the consent
+  // Stage 2: the worker on Google — the deploy, the switch of the Apps Script API, the consent
   // of the script and the rules. The schedule and the trial run come after the worker's own
   // ChatGPT session, and the last line of setup tells what they said (issue 30).
   const workerStage = stages.begin(t('The worker on Google', 'Воркер в Google'),
@@ -180,7 +179,7 @@ export async function setupGoogle({ fetch, io, mac: { files }, open, copy, googl
   if (!status.rules) workerDid(await ask('rules', { rules: { beforeExpiry: true, weeklyAutoApply: true } }), COMMAND);
   workerStage.done(steps ? undefined : t('already in place', 'уже на месте'));
 
-  // Stage 4: the worker's own session of ChatGPT. It comes before the schedule: a login into
+  // Stage 3: the worker's own session of ChatGPT. It comes before the schedule: a login into
   // a worker with no schedule spends nothing — it goes as a trial run — so the order is the
   // setup's own (the worker's doPost login decides by it).
   const chatgpt = stages.begin(t('Signing in to ChatGPT', 'Вход в ChatGPT'), chatgptWhy());
@@ -201,7 +200,7 @@ export async function setupGoogle({ fetch, io, mac: { files }, open, copy, googl
     chatgpt.done(email ?? t('signed in', 'вход выполнен'));
   }
 
-  // Stage 5: the schedule and the trial run; the screen the setup opens next shows what they did.
+  // Stage 4: the schedule and the trial run; the screen the setup opens next shows what they did.
   const first = stages.begin(t('First run', 'Первый запуск'),
     t('the schedule every 5 minutes and a trial check that spends nothing', 'расписание каждые 5 минут и пробная проверка, которая ничего не тратит'));
   stageIo = first.io;
@@ -214,7 +213,7 @@ export async function setupGoogle({ fetch, io, mac: { files }, open, copy, googl
   const trial = trialLine(await asking('trial') as unknown as Trial, timeZone);
   first.done(t('the trial check passed', 'пробная проверка прошла'));
   io.print('');
-  io.print(doneLine(trial.resets, { busy: trial.busy, platform: 'google', paused }));
+  io.print(doneLine(trial.resets, { busy: trial.busy, paused }));
   return 0;
 }
 

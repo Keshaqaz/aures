@@ -17,7 +17,7 @@ const run = (time: string, kind: JournalEntry['kind'], outcome: JournalEntry['ou
   over: Partial<JournalEntry> = {}): JournalEntry => ({ at: at(time), kind, outcome, durationMs, ...over });
 
 const page = (over: Partial<WorkerPage> = {}): WorkerPage => ({
-  platform: 'google', link: 'https://script.google.com/home/projects/your-script-id', paused: false, switching: null,
+  link: 'https://script.google.com/home/projects/your-script-id', paused: false,
   account: 'you@gmail.com', accounts: { chatgpt: 'you@gmail.com' }, googleSignIn: true,
   journal: { entries: [], readAt: NOW, responseMs: 400 }, polledAt: Date.parse('2026-10-26T12:42:30Z'), failed: null, ...over });
 const render = (p: WorkerPage, over: Partial<WorkerRenderOptions> = {}): Segment[][] =>
@@ -42,7 +42,7 @@ test('the frame of the screen «Воркер»: one bracket for the worker, one 
     `│ Google    you@gmail.com · вход работает${' '.repeat(19)}войти заново`,
     `│ ChatGPT   you@gmail.com · вход работает${' '.repeat(19)}войти заново`,
     '│',
-    '┃ Проверить сейчас   Починить   Пауза   Переключиться на GitHub Actions',
+    '┃ Проверить сейчас   Починить   Пауза',
   ]);
   assert.equal(lines[10], '╰─');
   assert.equal(lines[11], '');
@@ -54,35 +54,22 @@ test('the frame of the screen «Воркер»: one bracket for the worker, one 
   assert.doesNotMatch(lines.join('\n'), /АККАУНТЫ|ДЕЙСТВИЯ|▸/);
 });
 
-test('on GitHub, on pause and in an unfinished switch: the label and the actions that apply', () => {
-  const github = plain(render(page({ platform: 'github', account: 'octo-fake', googleSignIn: null,
-    link: 'https://github.com/octo-fake/codex-auto-resets-worker' })));
-  assert.match(github[3] ?? '', /^╭─ ВОРКЕР · GitHub Actions {3,}● активен$/);
-  assert.equal(github[9], '┃ Проверить сейчас  Починить  Пауза  Переключиться на Google Apps Script',
-    'two spaces between the labels when three do not fit the width');
-
+test('on pause: the label and the actions that apply', () => {
   const paused = render(page({ paused: true }));
   assert.match(plain(paused)[3] ?? '', /● на паузе$/);
   assert.deepEqual(paused[3]?.at(-1), ['на паузе', S.yellow], 'the pause is yellow, dot and label');
   assert.equal(plain(paused)[9], '┃ Проверить сейчас   Починить   Снять с паузы');
-  assert.doesNotMatch(plain(paused).join('\n'), /Переключиться/);
-
-  const switching = render(page({ switching: { from: 'github' } }));
-  assert.match(plain(switching)[3] ?? '', /● нет активного воркера$/);
-  assert.deepEqual(switching[4], [['│ ', S.dim], ['переключение не завершено', S.red]], 'the detail is the first line of the section');
-  assert.equal(plain(switching)[5], '│ https://script.google.com/home/projects/your-script-id');
-  assert.equal(plain(switching)[10], '┃ Повторить переключение');
+  assert.doesNotMatch(plain(render(page())).join('\n'), /Переключ/, 'there is no platform to switch to');
 });
 
 test('in English the same frame', () => {
   setLanguage('en');
   try {
-    const lines = plain(render(page({ platform: 'github', account: 'octo-fake', googleSignIn: null,
-      link: 'https://github.com/octo-fake/codex-auto-resets-worker' })));
-    assert.match(lines[3] ?? '', /^╭─ WORKER · GitHub Actions {3,}● active$/);
-    assert.match(lines[6] ?? '', /^│ GitHub {4}octo-fake {3,}sign in again$/);
+    const lines = plain(render(page()));
+    assert.match(lines[3] ?? '', /^╭─ WORKER · Google Apps Script {3,}● active$/);
+    assert.match(lines[6] ?? '', /^│ Google {4}you@gmail\.com · signed in {3,}sign in again$/);
     assert.match(lines[7] ?? '', /^│ ChatGPT {3}you@gmail\.com · signed in {3,}sign in again$/);
-    assert.equal(lines[9], '┃ Check now   Repair   Pause   Switch to Google Apps Script');
+    assert.equal(lines[9], '┃ Check now   Repair   Pause');
     assert.match(lines[12] ?? '', /^╭─ JOURNAL {3,}updated 12:42:30 · answer 0\.4 s$/);
     assert.equal(lines[13], '│ no runs yet');
   } finally { setLanguage('ru'); }
@@ -237,7 +224,7 @@ test('the caption of an action opens with a rule under its label, what it does u
   const lines = plain(open);
   assert.equal(lines[10], `│ ${' '.repeat(19)}━━━━━━━━`, 'a rule under «Починить»');
   assert.match(lines[11] ?? '', /^│ {3}Заново залить текущую версию воркера/);
-  assert.ok(lines.slice(11).some(line => line.includes('Сбросы, правила, вход в ChatGPT и журнал не трогаются')),
+  assert.ok(lines.slice(11).some(line => line.includes('правила, вход в ChatGPT и журнал не трогаются')),
     'the caption wraps to the width');
   assert.ok(lines.some(line => line.startsWith('╭─ ЖУРНАЛ')), 'the journal moves under the caption, and stays');
   assert.ok((open[11] ?? []).some(([text, style]) => text.includes('Заново залить') && style === ''),
@@ -247,13 +234,11 @@ test('the caption of an action opens with a rule under its label, what it does u
 });
 
 test('every action has its own caption', () => {
-  const starts = ['Пробный запуск:', 'Заново залить', 'Снять расписание:', 'Воркер на GitHub Actions готовится'];
+  const starts = ['Пробный запуск:', 'Заново залить', 'Снять расписание:'];
   for (const [i, start] of starts.entries()) {
     const lines = plain(render(page(), { cursor: FIRST_ACTION + i, caption: true }));
     assert.match(lines[11] ?? '', new RegExp(`^│ {3}${start}`), `the caption of action ${i}`);
   }
-  const retry = plain(render(page({ switching: { from: 'github' } }), { cursor: FIRST_ACTION, caption: true }));
-  assert.match(retry[12] ?? '', /^[│ ] {3}Довести переключение/, 'the caption comes under its rule, on a torn bracket');
   const paused = plain(render(page({ paused: true }), { cursor: FIRST_ACTION + 2, caption: true }));
   assert.match(paused[11] ?? '', /^╎ {3}Вернуть расписание/);
 });

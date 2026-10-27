@@ -123,9 +123,9 @@ export function withGoogle(world: FakeWorld & { google?: FakeGoogle }): FakeGoog
     open: async href => {
       google.opened.push(href);
       const url = new URL(href);
-      // The device-code pages of the ChatGPT and GitHub sign-ins, which the CLI opens for the
+      // The device-code page of the ChatGPT sign-in, which the CLI opens for the
       // user (issue 23); there is nothing to act out on them.
-      if (href === 'https://auth.openai.com/codex/device' || href === 'https://github.com/login/device') return;
+      if (href === 'https://auth.openai.com/codex/device') return;
       if (href === SCRIPT_HOME) return;
       if (href === USER_SETTINGS) {
         if (google.enableAfterMs !== null) enableAt ??= world.now + google.enableAfterMs;

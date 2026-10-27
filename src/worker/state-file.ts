@@ -1,4 +1,3 @@
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { object, asObject } from '../chatgpt/http.ts';
 import type { Session } from '../chatgpt/session.ts';
 import type { Quotas, IssuedReset, ConsumeResult } from '../chatgpt/client.ts';
@@ -15,12 +14,6 @@ export const STATE_MIGRATIONS: Migration[] = [];
 export const RULES_MIGRATIONS: Migration[] = [];
 export const STATE_FORMAT_VERSION = STATE_MIGRATIONS.length + 1;
 export const RULES_FORMAT_VERSION = RULES_MIGRATIONS.length + 1;
-// Version of the encryption envelope, separate from the state's own formatVersion.
-const ENVELOPE_VERSION = 1;
-const CIPHER = 'aes-256-gcm';
-// Binds the ciphertext to its role, so no other file sealed with this key opens as state.
-// Pure, so that the Apps Script bundle, which never seals, drops it: Buffer is not there.
-const AAD = /* @__PURE__ */ Buffer.from('codex-auto-resets/state');
 
 // Why a reset is applied: a general rule or «Применить сейчас».
 export type ApplyReason = 'weekly' | 'before_expiry' | 'apply_now';
@@ -34,7 +27,7 @@ export interface LastAttempt { creditId: string; reason: ApplyReason; at: number
 export type Observed = Quotas & { at: number; resets: IssuedReset[] };
 // The verdict on a login secret, which the CLI matches by id.
 export interface LoginVerdict { id: string; result: 'accepted' | 'rejected'; at: number }
-// The worker's encrypted state. Setup writes only formatVersion, session, pending and applied.
+// The worker's state. Setup writes only formatVersion, session, pending and applied.
 export interface State {
   formatVersion: number;
   session: Session;
@@ -48,7 +41,7 @@ export interface Rules { formatVersion: number; beforeExpiry: boolean; weeklyAut
 // The login secret the CLI writes.
 export interface Login { id: string; session: Session }
 
-export type BrokenStateReason = 'key_invalid' | 'state_missing' | 'state_unreadable' | 'state_undecryptable' |
+export type BrokenStateReason = 'state_missing' | 'state_unreadable' |
   'state_format_unknown' | 'state_without_session' | 'rules_missing' | 'rules_unreadable' | 'rules_format_unknown';
 
 // The worker cannot read its own repository files and only the user can fix them:
@@ -71,42 +64,6 @@ export function migrateState(state: unknown, steps: Migration[] = STATE_MIGRATIO
   const migrated = migrate(state, steps);
   if (!withSession(migrated)) throw new BrokenState('state_without_session');
   return migrated;
-}
-
-// `setup` generates the key once and stores it base64 in the Actions secret.
-export const generateKey = (): string => randomBytes(32).toString('base64');
-
-function keyBytes(key: string | undefined): Buffer {
-  const bytes = typeof key === 'string' ? Buffer.from(key, 'base64') : null;
-  if (bytes?.length !== 32) throw new BrokenState('key_invalid');
-  return bytes;
-}
-
-export function sealState(state: State, key: string | undefined): string {
-  const iv = randomBytes(12);
-  const cipher = createCipheriv(CIPHER, keyBytes(key), iv).setAAD(AAD);
-  const data = Buffer.concat([cipher.update(JSON.stringify(state), 'utf8'), cipher.final()]);
-  return `${JSON.stringify({ formatVersion: ENVELOPE_VERSION, cipher: CIPHER, iv: iv.toString('base64'),
-    tag: cipher.getAuthTag().toString('base64'), data: data.toString('base64') })}\n`;
-}
-
-// key is the STATE_KEY secret as the runner hands it: possibly unset.
-export function openState(text: string, key: string | undefined): State {
-  const bytes = keyBytes(key);
-  let envelope;
-  try { envelope = asObject(JSON.parse(text)); } catch { throw new BrokenState('state_unreadable'); }
-  if (envelope?.formatVersion !== ENVELOPE_VERSION || envelope.cipher !== CIPHER) throw new BrokenState('state_unreadable');
-  const { iv, tag, data } = envelope;
-  let plain;
-  try {
-    if (typeof iv !== 'string' || typeof tag !== 'string' || typeof data !== 'string') throw new TypeError('envelope');
-    const decipher = createDecipheriv(CIPHER, bytes, Buffer.from(iv, 'base64'), { authTagLength: 16 }).setAAD(AAD);
-    decipher.setAuthTag(Buffer.from(tag, 'base64'));
-    plain = Buffer.concat([decipher.update(Buffer.from(data, 'base64')), decipher.final()]).toString('utf8');
-  } catch { throw new BrokenState('state_undecryptable'); }
-  let state: unknown;
-  try { state = JSON.parse(plain); } catch { throw new BrokenState('state_unreadable'); }
-  return migrateState(state);
 }
 
 // The fields of a session the worker relies on; idToken is not checked.

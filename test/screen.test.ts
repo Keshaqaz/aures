@@ -4,8 +4,6 @@ import { PassThrough } from 'node:stream';
 import { setup } from '../src/cli/setup.ts';
 import { openScreen, runScreen, viewport } from '../src/cli/screen.ts';
 import type { Screen } from '../src/cli/screen.ts';
-import { FILES } from '../src/worker/layout.ts';
-import { readRules } from '../src/worker/state-file.ts';
 import { cliWorld } from './support/cli-world.ts';
 import pkg from '../package.json' with { type: 'json' };
 import { credit } from './support/fake-world.ts';
@@ -15,7 +13,6 @@ import { pauseWorker } from '../src/cli/pause.ts';
 import { login } from '../src/cli/login.ts';
 import type { Language } from '../src/cli/language.ts';
 import { setLanguage } from '../src/cli/language.ts';
-import { switchWorld } from './support/switch-world.ts';
 import { renderOverview } from '../src/cli/overview.ts';
 import type { Overview } from '../src/cli/overview.ts';
 
@@ -25,13 +22,12 @@ const HINT = '↑↓ выбор · Enter применить · Tab воркер 
 // 3 hours) and reset-a (in 5 days). Device codes the screen shows are approved at once.
 async function opened({ language = 'ru' }: { language?: Language } = {}) {
   const env = await cliWorld({ language });
-  const { code, io } = await env.run(setup, { answers: ['1', ''] });
+  const { code, io } = await env.run(setup);
   assert.equal(code, 0, io.output());
   let screen: Screen | undefined;
   const sleep = async (ms: number) => {
     for (const note of screen?.notes ?? []) {
       for (const [found] of note.text.matchAll(/FAKE-\d+/g)) env.world.approve(found);
-      for (const [found] of note.text.matchAll(/GHFK-\d+/g)) env.world.github.approve(found);
     }
     env.world.advance(ms);
   };
@@ -41,35 +37,35 @@ async function opened({ language = 'ru' }: { language?: Language } = {}) {
   const press = (...names: string[]) => names.reduce<Promise<unknown>>((done, name) => done.then(() => shown.press({ name, sequence: name })),
     Promise.resolve());
   const text = () => shown.frame().join('\n');
-  const repo = env.world.github.repo();
-  assert.ok(repo);
-  return { ...env, repo, screen: shown, press, text };
+  const project = env.world.google.project();
+  assert.ok(project?.gas);
+  return { ...env, project, gas: project.gas, screen: shown, press, text };
 }
 
 test('the screen shows the resets on top, the rules under them and moves the cursor over both', async () => {
   const { screen, press, text } = await opened();
   assert.equal(screen.frame()[4], `┃ reset-b   через 2 д 2 ч${' '.repeat(35)}22 окт 15:00`);
-  assert.match(text(), /ПРАВИЛА\n│ ☑ Перед истечением \(в последние 8 часов\)\n│ ☐ Когда кончится недельный лимит/);
+  assert.match(text(), /ПРАВИЛА\n│ ☑ Перед истечением \(в последний час\)\n│ ☑ Когда кончится недельный лимит/);
   assert.equal(screen.frame().at(-1), HINT);
 
   await press('down', 'down', 'down');
-  assert.match(text(), /┃ ☐ Когда кончится недельный лимит/);
+  assert.match(text(), /┃ ☑ Когда кончится недельный лимит/);
   await press('down');
   assert.match(text(), /┃ reset-b/, 'the cursor goes round');
   await press('up');
-  assert.match(text(), /┃ ☐ Когда кончится недельный лимит/);
+  assert.match(text(), /┃ ☑ Когда кончится недельный лимит/);
 });
 
 test('both screens in brackets: sections open and close, one rule under the header, no ▸ anywhere', async () => {
   const { screen, press, text } = await opened();
   assert.match(text(), /\n─+\n\n╭─ СБРОСЫ · 2\n[┃│] reset-b {3}[^\n]*\n[┃│] reset-a {3}[^\n]*\n╰─\n\n╭─ ПРАВИЛА\n/);
-  assert.match(text(), /\n╰─\n\n╭─ ВОРКЕР · GitHub Actions {3,}● активен\n│ ждёт запуска по расписанию\n╰─\n/);
+  assert.match(text(), /\n╰─\n\n╭─ ВОРКЕР · Google Apps Script {3,}● активен\n│ ждёт запуска по расписанию\n╰─\n/);
   assert.equal(screen.frame().filter(line => line === '─'.repeat(72)).length, 1, 'the one rule is under the header');
   assert.doesNotMatch(text(), /▸/);
 
   await press('tab');
-  assert.match(text(), /\n╭─ ВОРКЕР · GitHub Actions {3,}● активен\n│ https:\/\/github\.com\/octo-fake\/codex-auto-resets-worker\n│\n/);
-  assert.match(text(), /\n┃ Проверить сейчас[^\n]*\n╰─\n\n╭─ ЖУРНАЛ {3,}обновлено [^\n]*\n[┃│] [^\n]*\n(?:│\n)*╰─\n/);
+  assert.match(text(), /\n╭─ ВОРКЕР · Google Apps Script {3,}● активен\n│ https:\/\/script\.google\.com\/home\/projects\/[^\n]+\n│\n/);
+  assert.match(text(), /\n┃ Проверить сейчас[^\n]*\n╰─\n\n╭─ ЖУРНАЛ {3,}обновлено [^\n]*\n(?:[┃│] [^\n]*\n)+(?:│\n)*╰─\n/);
   assert.equal(screen.frame().filter(line => line === '─'.repeat(72)).length, 1, 'the one rule is under the header here too');
   assert.doesNotMatch(text(), /▸/);
 });
@@ -81,24 +77,22 @@ test('in a narrow terminal every line of both screens folds under its text, none
   for (const line of narrow()) assert.ok([...line].length <= width, line);
   await press('tab');
   for (const line of narrow()) assert.ok([...line].length <= width, line);
-  assert.ok(narrow().some(line => line.startsWith('│ https://github.com/octo-fake/')), narrow().join('\n'));
-  assert.ok(narrow().some(line => line.includes('codex-auto-resets-worker')), narrow().join('\n'));
+  assert.ok(narrow().some(line => line.startsWith('│ https://script.google.com/')), narrow().join('\n'));
   assert.deepEqual(screen.frame().filter(line => [...line].length > width).length > 0, true, 'the lines themselves stay whole');
   screen.close();
 });
 
 test('Enter on a reset applies it now after a «y», any other key cancels', async () => {
-  const { world, repo, press, text, screen } = await opened();
+  const { world, press, text, screen } = await opened();
   await press('down', 'return');
   assert.equal(screen.frame().at(-1), 'Применить reset-a сейчас? Сброс одноразовый. y — да, другая клавиша — отмена');
   await press('n');
   assert.equal(screen.frame().at(-1), HINT);
-  assert.equal(repo.runs.length, 1, 'only the trial run of setup');
+  assert.deepEqual(world.spent(), [], 'nothing is applied without the «y»');
 
   await press('return');
   await screen.press({ sequence: 'н' }); // «y» on the Russian layout
   assert.deepEqual(world.spent(), ['reset-a']);
-  assert.deepEqual(repo.runs[0]?.inputs, { apply_now: 'reset-a' });
   assert.match(text(), /\nСброс reset-a применён\.\n/);
   assert.match(text(), /СБРОСЫ · 1\n┃ reset-b/, 'the applied reset is gone and the cursor stays in the list');
   assert.match(text(), /применён reset-a 20 окт 12:00 — вручную/);
@@ -107,46 +101,45 @@ test('Enter on a reset applies it now after a «y», any other key cancels', asy
   assert.doesNotMatch(text(), /применён\./, 'the next key clears the result');
 });
 
-test('Enter on a rule switches it, and the weekly rule sets up the check from this Mac', async () => {
-  const { world, repo, mac, press, text } = await opened();
+test('Enter on a rule switches it in the worker, and the weekly rule needs nothing from this Mac', async () => {
+  const { gas, mac, press, text } = await opened();
+  const rules = () => JSON.parse(gas.properties.get('rules') ?? 'null');
   await press('down', 'down', 'down', 'return');
-  assert.deepEqual(readRules(world.github.text(repo, FILES.rules)), { formatVersion: 1, beforeExpiry: true, weeklyAutoApply: true });
-  assert.equal(repo.commits.at(-1)?.message, 'Change the general rules');
-  assert.match(text(), /Откройте https:\/\/auth\.openai\.com\/codex\/device и введите код FAKE-\d+ \(код скопирован\)\nЕсли браузер не открылся: https:\/\/auth\.openai\.com\/codex\/device/);
-  assert.match(text(), /Правила сохранены и заработают со следующего запуска воркера\.\n.*\nОткройте https:\/\/auth\.openai\.com\/codex\/device и введите код FAKE-\d+ \(код скопирован\)\nЕсли браузер не открылся: https:\/\/auth\.openai\.com\/codex\/device\nВнеочередная проверка с этого Mac включена\.\n\n↑↓/);
-  assert.match(text(), /┃ ☑ Когда кончится недельный лимит · проверка с Mac работает/);
-  assert.ok(await mac.files.readSession());
+  assert.deepEqual(rules(), { formatVersion: 1, beforeExpiry: true, weeklyAutoApply: false });
+  assert.match(text(), /Правила сохранены и заработают со следующего запуска воркера\./);
+  assert.match(text(), /┃ ☐ Когда кончится недельный лимит\n/);
+  assert.doesNotMatch(text(), /FAKE-\d+|проверка с Mac/, 'no sign-in and no check from this Mac');
 
   await press('return');
-  assert.equal(readRules(world.github.text(repo, FILES.rules)).weeklyAutoApply, false);
-  assert.match(text(), /Внеочередная проверка с этого Mac выключена\./);
-  assert.ok(await mac.files.readSession());
+  assert.equal(rules().weeklyAutoApply, true);
+  assert.match(text(), /┃ ☑ Когда кончится недельный лимит\n/);
+  assert.deepEqual(mac.launchctl.calls, []);
 });
 
 test('a reset with an ID as ChatGPT gives it is shown as RES and the last 4 characters and applied by the whole ID', async () => {
-  const { world, repo, press, text, screen } = await opened();
+  const { world, gas, press, text, screen } = await opened();
   const id = 'RateLimitResetCredit_0eb466b3212c819193799a1741f067f8';
   world.chatgpt.credits.push(credit(id, world.now + 3 * 86400_000));
-  await world.github.schedule();
+  world.advance(5 * 60_000);
+  gas.tick();
   await screen.load();
-  assert.match(text(), /\n│ RES67F8 {3}через 3 д/);
+  assert.match(text(), /\n│ RES67F8 {3}через 2 д 23 ч/);
   assert.doesNotMatch(text(), /RateLimitResetCredit/);
   await press('down', 'return');
   assert.match(screen.frame().at(-1) ?? '', /^Применить RES67F8 сейчас\?/);
   await press('y');
-  assert.deepEqual(repo.runs[0]?.inputs, { apply_now: id });
+  assert.deepEqual(world.spent(), [id]);
   assert.match(text(), /\nСброс RES67F8 применён\.\n/);
   assert.match(text(), /применён RES67F8 /);
 });
 
 test('a failed action shows why and leaves the screen open', async () => {
-  const { repo, press, text, screen } = await opened();
-  repo.workflowState = 'disabled_manually';
+  const { world, project, press, text, screen } = await opened();
+  project.deployments.clear();
   await press('return', 'y');
-  assert.match(text(), /\nВоркер выключен в GitHub\. Включите его кнопкой Enable workflow: .*\n\n↑↓ выбор/);
-  assert.match(text(), /● выключен в GitHub/);
+  assert.match(text(), /\nОшибка Google \(web_app_404\)\. Повторите: сделанное сохранится\.\n/);
   assert.equal(screen.busy, null);
-  assert.equal(repo.runs.length, 1);
+  assert.deepEqual(world.spent(), []);
 });
 
 // The screen in a fake terminal of the size given: its output and keys.
@@ -242,7 +235,7 @@ test('the screen in English: l switches to Russian and back, keeping the choice 
   const { mac, press, text, screen, run } = await opened({ language: 'en' });
   assert.equal(screen.frame()[0], `aures ${pkg.version}${' '.repeat(44 - pkg.version.length)}20 Oct 12:00   EN · RU`);
   assert.equal(screen.frame()[4], `┃ reset-b   in 2d 2h${' '.repeat(40)}22 Oct 15:00`);
-  assert.match(text(), /RULES\n│ ☑ Before expiry \(in the last 8 hours\)\n│ ☐ When the weekly limit runs out/);
+  assert.match(text(), /RULES\n│ ☑ Before expiry \(in the last hour\)\n│ ☑ When the weekly limit runs out/);
   assert.match(text(), /● active/);
   assert.match(text(), /\n│ waiting for a scheduled run/);
   assert.equal(screen.frame().at(-1), '↑↓ select · Enter apply · Tab worker · l language · r refresh · q quit');
@@ -266,53 +259,15 @@ test('the screen in English: l switches to Russian and back, keeping the choice 
 // accounts, the actions in one row and the live journal in a window that scrolls.
 const WORKER_HINT = '↑↓←→ выбор · Enter действие · Tab сбросы · l язык · r обновить · q выход';
 const SCROLL_HINT = '↑↓ листать · PgUp PgDn страница · Home свежие · Esc действия · q выход';
-const REPAIR_CAPTION = 'Заново залить текущую версию воркера и вернуть расписание на этой площадке. Сбросы, правила, вход в ChatGPT ' +
+const REPAIR_CAPTION = 'Заново залить текущую версию воркера и вернуть расписание. Сбросы, правила, вход в ChatGPT ' +
   'и журнал не трогаются. Поможет, если воркер перестал запускаться или его файлы меняли вручную';
 const HOUR = 3600_000, MINUTE = 60_000, DAY = 24 * HOUR;
 
-// The same screen of a worker that setup installed on Google Apps Script.
-async function openedOnGoogle() {
-  const env = await cliWorld();
-  const { code, io } = await env.run(setup, { answers: ['2', ''] });
-  assert.equal(code, 0, io.output());
-  let screen: Screen | undefined;
-  await env.run(async options => { screen = await openScreen(options); screen.motion = false; return 0; });
-  assert.ok(screen);
-  const shown = screen;
-  const press = (...names: string[]) => names.reduce<Promise<unknown>>((done, name) => done.then(() => shown.press({ name, sequence: name })),
-    Promise.resolve());
-  const project = env.world.google.project();
-  assert.ok(project?.gas);
-  return { ...env, project, gas: project.gas, screen: shown, press, text: () => shown.frame().join('\n') };
-}
+// The screen of the worker on Google, as the tests that name the platform call it.
+const openedOnGoogle = (): ReturnType<typeof opened> => opened();
 // The caption of an action as one line, the way the frame wraps it.
-// The text of a caption; a torn bracket (an unfinished switch) leaves some of its lines without the rail.
+// The text of a caption; a dashed bracket (a pause) has its rail dashed.
 const caption = (frame: string[]): string => frame.filter(line => /^[│╎ ] {3}\S/.test(line)).map(line => line.slice(4)).join(' ');
-
-test('the screen «Воркер» on GitHub: Tab opens it from the resets and goes back', async () => {
-  const { screen, press, text } = await opened();
-  assert.equal(screen.frame().at(-1), HINT);
-  await press('tab');
-  assert.equal(screen.view, 'worker');
-  assert.match(screen.frame()[0] ?? '', /^aures \S+ +20 окт 12:00 {3}EN · RU$/);
-  assert.match(text(), new RegExp('\n╭─ ВОРКЕР · GitHub Actions {3,}● активен\n' +
-    '│ https://github\\.com/octo-fake/codex-auto-resets-worker\n│\n' +
-    '│ GitHub {4}octo-fake {3,}войти заново\n│ ChatGPT {3}fake@example\\.invalid · вход работает {3,}войти заново\n│\n' +
-    '┃ Проверить сейчас {2}Починить {2}Пауза {2}Переключиться на Google Apps Script\n╰─\n\n'));
-  assert.match(text(), /\n╭─ ЖУРНАЛ {3,}обновлено 12:00:\d\d · ответ 0,0 с\n│ 12:00 {2}вы {2}пробная проверка — применять нечего\n/);
-  assert.doesNotMatch(text(), /СБРОСЫ|ПРАВИЛА|АККАУНТЫ|ДЕЙСТВИЯ/);
-  assert.equal(screen.frame().at(-1), WORKER_HINT);
-
-  await press('left');
-  assert.match(text(), /\n┃ Проверить сейчас {2}Починить {2}Пауза {2}Переключиться на Google Apps Script\n/, 'left goes round');
-  await press('right');
-  assert.match(text(), /\n┃ Проверить сейчас {2}Починить/, 'and right back to the first');
-
-  await press('tab');
-  assert.equal(screen.view, 'resets');
-  assert.match(text(), /СБРОСЫ · 2[\s\S]*ПРАВИЛА/);
-  assert.equal(screen.frame().at(-1), HINT);
-});
 
 test('a long line of a section folds on the rail of its bracket: the bracket stays whole', async () => {
   const { screen, press, project } = await openedOnGoogle();
@@ -326,7 +281,7 @@ test('a long line of a section folds on the rail of its bracket: the bracket sta
 
 test('the terminal: an open caption keeps the header and its rule in place and comes into view', async () => {
   const { world, screen } = await openedOnGoogle();
-  const { input, done, press, written } = terminal(screen, { columns: 100, rows: 18 });
+  const { input, done, press, written } = terminal(screen, { columns: 100, rows: 17 });
   try {
     await press('\t');
     while (screen.busy !== null || screen.view !== 'worker') await new Promise(resolve => setImmediate(resolve));
@@ -351,7 +306,7 @@ test('the screen «Воркер» on Google: the platform, its accounts and the 
   await screen.press({ name: 'tab', sequence: '\t' });
   assert.match(text(), new RegExp(`\n╭─ ВОРКЕР · Google Apps Script {3,}● активен\n│ https://script\\.google\\.com/home/projects/${project.scriptId}\n│\n`));
   assert.match(text(), /\n│ Google {4}owner@example\.invalid · вход работает {3,}войти заново\n│ ChatGPT {3}fake@example\.invalid · вход работает {3,}войти заново\n│\n/);
-  assert.match(text(), /\n┃ Проверить сейчас {3}Починить {3}Пауза {3}Переключиться на GitHub Actions\n╰─\n\n╭─ ЖУРНАЛ/);
+  assert.match(text(), /\n┃ Проверить сейчас {3}Починить {3}Пауза\n╰─\n\n╭─ ЖУРНАЛ/);
   // The journal is newest first in its window: the trial run of setup, then its login.
   assert.match(text(), /\n╭─ ЖУРНАЛ {3,}обновлено 12:00:\d\d · ответ 0,0 с\n│ 12:00 {2}вы {2}пробная проверка — применять нечего\n│ 12:00 {2}вы {2}вход в ChatGPT — сессия воркера обновлена\n/);
   assert.equal(caption(screen.frame()), '', 'the caption shows under the cursor only');
@@ -390,9 +345,9 @@ test('the screen «Воркер» on Google: the platform, its accounts and the 
 test('the screen «Воркер» in English', async () => {
   const { screen, press, text } = await opened({ language: 'en' });
   await press('tab');
-  assert.match(text(), /\n╭─ WORKER · GitHub Actions {3,}● active\n/);
-  assert.match(text(), /\n│ GitHub {4}octo-fake {3,}sign in again\n│ ChatGPT {3}fake@example\.invalid · signed in {3,}sign in again\n│\n/);
-  assert.match(text(), /\n┃ Check now {3}Repair {3}Pause {3}Switch to Google Apps Script\n/);
+  assert.match(text(), /\n╭─ WORKER · Google Apps Script {3,}● active\n/);
+  assert.match(text(), /\n│ Google {4}owner@example\.invalid · signed in {3,}sign in again\n│ ChatGPT {3}fake@example\.invalid · signed in {3,}sign in again\n│\n/);
+  assert.match(text(), /\n┃ Check now {3}Repair {3}Pause\n/);
   assert.match(text(), /\n╭─ JOURNAL {3,}updated 12:00:\d\d · answer 0\.0 s\n│ 12:00 {2}you {2}trial check — nothing to apply\n/);
   assert.equal(screen.frame().at(-1), '↑↓←→ select · Enter run · Tab resets · l language · r refresh · q quit');
 });
@@ -511,20 +466,6 @@ test('the journal collapses a run of identical ticks into one line with their co
   assert.match(text(), /\n│ 12:05–12:35 {2}расписание {2}7 проверок — всё в порядке, применять нечего\n│ 12:00 {8}вы {10}пробная проверка — применять нечего\n│ 12:00 {8}вы {10}вход в ChatGPT — сессия воркера обновлена\n/);
 });
 
-test('«Проверить сейчас» on GitHub runs the trial run and the journal tells what the rules would apply', async () => {
-  const { world, repo, screen, press, text } = await opened();
-  world.chatgpt.credits.push(credit('reset-c', world.now + 2 * HOUR));
-  await press('tab', 'return');
-  assert.equal(repo.runs.length, 2);
-  assert.deepEqual(repo.runs[0]?.inputs, { apply_now: '', trial_run: 'true' });
-  assert.deepEqual(world.spent(), [], 'a trial run applies nothing');
-  assert.match(text(), /\n╭─ ЖУРНАЛ {3,}обновлено [\d:]+ · ответ 0,0 с\n[┃│] 12:\d\d {2}вы {2}Проверить сейчас: /);
-  assert.match(text(), /применили бы сброс reset-c/);
-  await press('down', 'down', 'down'); // into the journal, past the folded step
-  assert.match(text(), /\n[┃│] 12:\d\d {2}вы {2}пробная проверка: применили бы reset-c — перед истечением\n/);
-  assert.equal(screen.busy, null);
-});
-
 test('«Проверить сейчас» on Google asks the worker for a trial run and the journal tells what the rules would apply', async () => {
   const { world, gas, press, text } = await openedOnGoogle();
   world.chatgpt.credits.push(credit('reset-c', world.now + 30 * MINUTE));
@@ -536,52 +477,6 @@ test('«Проверить сейчас» on Google asks the worker for a trial 
   assert.match(text(), /\n[┃│] 12:\d\d {2}вы {2}Проверить сейчас: /);
   await press('down', 'down', 'down'); // into the journal, past the folded step
   assert.match(text(), /\n[┃│] 12:\d\d {2}вы {2}пробная проверка: применили бы reset-c — перед истечением\n/);
-});
-
-// What «Починить» must leave as it was on GitHub: the sealed state, the rules and the secrets.
-const kept = (repo: NonNullable<ReturnType<Awaited<ReturnType<typeof cliWorld>>['world']['github']['repo']>>) => ({
-  state: repo.files.get(FILES.state)?.text, rules: repo.files.get(FILES.rules)?.text, secrets: new Map(repo.secrets) });
-
-test('«Починить» on GitHub puts this version\'s worker and workflow back and brings the schedule back, the state stays', async () => {
-  const { world, repo, screen, press, text } = await opened();
-  const workflow = world.github.text(repo, FILES.workflow), before = kept(repo), runs = repo.runs.length;
-  world.github.write(repo, FILES.worker, '// changed by hand\n');
-  repo.files.delete(FILES.workflow);
-  repo.workflowState = 'disabled_manually';
-
-  await press('tab', 'right', 'return', 'left');
-  assert.equal(world.github.text(repo, FILES.worker), '// fake worker bundle\n');
-  assert.equal(world.github.text(repo, FILES.workflow).replace(/^\s+- cron: .*$/m, ''), workflow.replace(/^\s+- cron: .*$/m, ''));
-  assert.equal(repo.workflowState, 'active');
-  assert.deepEqual(kept(repo), before);
-  assert.equal(repo.runs.length, runs, 'no worker run');
-  assert.match(text(), /\n[┃│] [\d:–]+ +вы +Починить: Воркер починен: залита версия/);
-  assert.match(text(), /расписание\n[┃│] +вернулось\./);
-  assert.equal(screen.busy, null);
-  assert.deepEqual(world.github.violations, []);
-});
-
-test('«Починить» on GitHub keeps the cron minute of a workflow it rewrites', async () => {
-  const { world, repo, press } = await opened();
-  const workflow = world.github.text(repo, FILES.workflow);
-  world.github.write(repo, FILES.workflow, workflow.replace('Worker', 'Worker changed by hand'));
-  await press('tab', 'right', 'return');
-  assert.equal(world.github.text(repo, FILES.workflow), workflow);
-});
-
-test('«Починить» on a paused GitHub worker puts the files back but not the schedule', async () => {
-  const { world, repo, run, press, text } = await opened();
-  assert.equal((await run(pauseWorker)).code, 0);
-  world.github.write(repo, FILES.worker, '// changed by hand\n');
-  const before = kept(repo);
-  await press('tab');
-  assert.match(text(), /\n╭╌ ВОРКЕР · GitHub Actions {3,}● на паузе\n/);
-  await press('right', 'return', 'left');
-  assert.equal(world.github.text(repo, FILES.worker), '// fake worker bundle\n');
-  assert.equal(repo.workflowState, 'disabled_manually');
-  assert.deepEqual(kept(repo), before);
-  assert.match(text(), /\n[┃│] [\d:–]+ +вы +Починить: Воркер починен: залита версия/);
-  assert.match(text(), /осталось снятым\./);
 });
 
 test('«Починить» on Google deploys this version into the same deployment and brings the schedule back, the data stays', async () => {
@@ -624,33 +519,10 @@ test('«Починить» on a paused Google worker deploys the code but leaves
   assert.match(text(), /осталось снятым\./);
 });
 
-test('«Пауза» and «Снять с паузы» on GitHub: the schedule goes off and comes back, the journal tells both steps', async () => {
-  const { repo, mac, screen, press, text } = await opened();
-  await press('tab');
-  assert.match(text(), /\n┃ Проверить сейчас {2}Починить {2}Пауза {2}Переключиться/);
-
-  await press('right', 'right', 'return');
-  assert.equal(screen.busy, null);
-  assert.equal(repo.workflowState, 'disabled_manually');
-  assert.deepEqual(await mac.files.readInstall(), { platform: 'github', paused: true, accounts: { chatgpt: 'fake@example.invalid' } });
-  assert.match(text(), /\n╭╌ ВОРКЕР · GitHub Actions {3,}● на паузе\n/);
-  assert.match(text(), /\n┃ Проверить сейчас {3}Починить {3}Снять с паузы\n/, 'the action that applies to the state');
-  assert.doesNotMatch(text(), /Переключиться/);
-  assert.match(text(), /\n[┃│] 12:\d\d {2}вы {2}Пауза: Воркер на паузе: расписание снято/);
-
-  await press('return');
-  assert.equal(repo.workflowState, 'active');
-  assert.equal((await mac.files.readInstall())?.paused, undefined);
-  assert.match(text(), /\n╭─ ВОРКЕР · GitHub Actions {3,}● активен\n/);
-  assert.match(text(), /\n┃ Проверить сейчас {2}Починить {2}Пауза {2}Переключиться/, 'the worker can be paused again');
-  assert.match(text(), /\n[┃│] 12:\d\d {2}вы {2}Снять с паузы: Воркер снят с паузы: расписание/);
-  assert.match(text(), /вернулось\./);
-});
-
 test('«Пауза» and «Снять с паузы» on Google: the trigger goes off and comes back, the journal tells both steps', async () => {
   const { gas, mac, screen, press, text } = await openedOnGoogle();
   await press('tab');
-  assert.match(text(), /\n┃ Проверить сейчас {3}Починить {3}Пауза {3}Переключиться/);
+  assert.match(text(), /\n┃ Проверить сейчас {3}Починить {3}Пауза\n/);
 
   await press('right', 'right', 'return');
   assert.equal(screen.busy, null);
@@ -664,32 +536,33 @@ test('«Пауза» and «Снять с паузы» on Google: the trigger goe
   assert.deepEqual(gas.triggers, [{ handler: 'tick', minutes: 5 }]);
   assert.equal((await mac.files.readInstall())?.paused, undefined);
   assert.match(text(), /\n╭─ ВОРКЕР · Google Apps Script {3,}● активен\n/);
-  assert.match(text(), /\n┃ Проверить сейчас {3}Починить {3}Пауза {3}Переключиться/);
+  assert.match(text(), /\n┃ Проверить сейчас {3}Починить {3}Пауза\n/);
   assert.match(text(), /\n[┃│] 12:\d\d {2}вы {2}Снять с паузы: Воркер снят с паузы: расписание/);
   assert.match(text(), /вернулось\./);
 });
 
 test('«Починить» after «Пауза» from the screen puts the code in and leaves the schedule off', async () => {
-  const { world, repo, screen, press, text } = await opened();
-  world.github.write(repo, FILES.worker, '// changed by hand\n');
+  const { project, gas, screen, press, text } = await opened();
+  const worker = project.files.find(file => file.name === 'worker');
+  assert.ok(worker);
+  const source = worker.source;
+  worker.source = '// changed by hand\n';
   await press('tab', 'right', 'right', 'return');
-  assert.match(text(), /\n╭╌ ВОРКЕР · GitHub Actions {3,}● на паузе\n/);
+  assert.match(text(), /\n╭╌ ВОРКЕР · Google Apps Script {3,}● на паузе\n/);
 
   await press('left', 'return', 'left');
   assert.equal(screen.busy, null);
-  assert.equal(world.github.text(repo, FILES.worker), '// fake worker bundle\n');
-  assert.equal(repo.workflowState, 'disabled_manually', 'the repair does not bring the schedule back');
+  assert.equal(project.files.find(file => file.name === 'worker')?.source, source);
+  assert.deepEqual(gas.triggers, [], 'the repair does not bring the schedule back');
   assert.match(text(), /\n[┃│] 12:\d\d {2}вы {2}Пауза: Воркер на паузе: расписание снято/);
   assert.match(text(), /\n[┃│] 12:\d\d {2}вы {2}Починить: Воркер починен: залита версия/);
   assert.match(text(), /осталось снятым\./);
 });
 
-// The web app polls the worker on Google; the Actions runs API on GitHub.
-// A doPost is a POST and the GET of its redirect; the POSTs are counted.
+// The screen polls the worker in its web app: a doPost is a POST and the GET of its redirect;
+// the POSTs are counted.
 const webAppPolls = (world: { google: { requests: { method: string; url: string }[] } }) =>
   world.google.requests.filter(r => r.method === 'POST' && r.url.includes('/macros/')).length;
-const runListings = (world: { github: { requests: { method: string; path: string }[] } }) =>
-  world.github.requests.filter(r => r.method === 'GET' && /\/actions\/workflows\/[^/]+\/runs$/.test(r.path)).length;
 
 test('the screen «Воркер» polls Google every 30 s while it is open and stops on the resets and on close', async t => {
   t.mock.timers.enable({ apis: ['setInterval'] });
@@ -720,35 +593,6 @@ test('the screen «Воркер» polls Google every 30 s while it is open and s
   assert.equal(webAppPolls(world), again, 'no poll after the screen closed');
 });
 
-test('the screen «Воркер» polls GitHub every 60 s while it is open and stops on the resets and on close', async t => {
-  t.mock.timers.enable({ apis: ['setInterval'] });
-  const { world, screen, press, text } = await opened();
-  await press('tab');
-  const opened_ = runListings(world);
-  t.mock.timers.tick(30_000);
-  await screen.polling;
-  assert.equal(runListings(world), opened_);
-  world.advance(HOUR);
-  await world.github.schedule();
-  t.mock.timers.tick(30_000);
-  await screen.polling;
-  assert.equal(runListings(world), opened_ + 1);
-  assert.match(text(), /\n╭─ ЖУРНАЛ {3,}обновлено 13:00:\d\d · ответ 0,0 с\n[┃│] 13:00 {2}расписание {2}всё в порядке, применять нечего\n/);
-
-  await press('tab');
-  const onResets = runListings(world);
-  t.mock.timers.tick(5 * 60_000);
-  await screen.polling;
-  assert.equal(runListings(world), onResets);
-
-  await press('tab');
-  const again = runListings(world);
-  assert.equal(await screen.press({ name: 'c', sequence: '\x03', ctrl: true }), 'exit');
-  t.mock.timers.tick(5 * 60_000);
-  await screen.polling;
-  assert.equal(runListings(world), again);
-});
-
 test('a poll that got no answer keeps the journal and says why over it', async () => {
   const { project, screen, press, text } = await openedOnGoogle();
   await press('tab');
@@ -762,12 +606,14 @@ test('a poll that got no answer keeps the journal and says why over it', async (
 
 test('the emails of the accounts come from the sign-ins; an install from before them names the accounts unknown', async () => {
   const { mac, run, screen, press, text } = await opened();
-  assert.deepEqual((await mac.files.readInstall())?.accounts, { chatgpt: 'fake@example.invalid' }, 'setup keeps the ChatGPT email of the id_token');
+  assert.deepEqual((await mac.files.readInstall())?.accounts, { google: 'owner@example.invalid', chatgpt: 'fake@example.invalid' },
+    'setup keeps the emails of the Google sign-in and of the ChatGPT id_token');
   const install = await mac.files.readInstall();
   assert.ok(install);
   const { accounts: _accounts, ...before } = install;
   await mac.files.writeInstall(before);
   await press('tab');
+  assert.match(text(), /\n│ Google {4}аккаунт неизвестен · вход работает {3,}войти заново\n/);
   assert.match(text(), /\n│ ChatGPT {3}аккаунт неизвестен · вход работает {3,}войти заново\n/);
 
   // `aures login` keeps the email of its new session; so does «войти заново» on the screen.
@@ -784,10 +630,10 @@ test('the emails of the accounts come from the sign-ins; an install from before 
 test('a Google grant without the email scope is no broken grant: setup goes on and the account reads as unknown', async () => {
   const env = await cliWorld();
   env.world.google.grantsEmail = false;
-  const { code, io } = await env.run(setup, { answers: ['2', ''] });
+  const { code, io } = await env.run(setup, { answers: [] });
   assert.equal(code, 0, io.output());
   // The stage's ✓ names no account (issue 30): the grant gave no email to name.
-  assert.match(io.output(), /\[2\/5\] Вход в Google\n.*\n {6}✓ вход выполнен\n/);
+  assert.match(io.output(), /\[1\/4\] Вход в Google\n.*\n {6}✓ вход выполнен\n/);
   assert.equal((await env.mac.files.readInstall())?.accounts?.google, undefined);
   let screen: Screen | undefined;
   await env.run(async options => { screen = await openScreen(options); screen.motion = false; return 0; });
@@ -838,93 +684,6 @@ test('a Google sign-in that Google no longer takes reads as lost, «войти �
   assert.match(text(), /\n┃ Google {4}owner@example\.invalid · вход работает {3,}войти заново\n/);
 });
 
-test('«Войти заново» for GitHub takes only the account of the worker repository', async () => {
-  const { world, keychain, screen, press, text } = await opened();
-  const before = await keychain.read();
-  await press('tab', 'up', 'up', 'return');
-  assert.match(text(), /\n[┃│] 12:\d\d {2}вы {2}GitHub: Вы вошли в GitHub как octo-fake\./);
-  const renewed = await keychain.read();
-  assert.notEqual(renewed, before);
-
-  world.github.login = 'someone-else';
-  await press('return');
-  assert.equal(screen.busy, null);
-  assert.match(text(), /\n[┃│] 12:\d\d {2}вы {2}GitHub: Это аккаунт GitHub someone-else, а воркер в/);
-  assert.match(text(), /octo-fake\. Войдите в него\./);
-  assert.equal(await keychain.read(), renewed, 'the sign-in before it is back');
-});
-
-// «Переключиться на …» (issue 13): the frames of the switch as it goes, of its refusal and of Esc.
-test('the frames of a switch: the caption, the steps in the journal, Esc offered until the quench and not after', async () => {
-  const env = await switchWorld('github');
-  const { press, text, world } = env;
-  await press('tab', 'right', 'right', 'right');
-  assert.match(text(), /\n┃ Проверить сейчас {2}Починить {2}Пауза {2}Переключиться на Google Apps Script\n/);
-  world.advance(400); // the caption opens after the cursor has stood on the action
-  const switchCaption = caption(env.screen.frame());
-  assert.equal(switchCaption, 'Воркер на Google Apps Script готовится без расписания, пока этот работает: вы входите для него в ChatGPT, ' +
-    'правила переезжают с ним. Затем этот воркер гасится (расписание снято, сессия ChatGPT отозвана, репозиторий сохранён), и у нового ' +
-    'включается расписание. Esc до гашения отменяет переключение и оставляет этот воркер как есть');
-
-  // A frame while the new worker is signed in to ChatGPT, and one while the old one is quenched.
-  // The cursor stands on «Переключиться», so its caption is over the journal: the steps it keeps
-  // are read from what the screen did.
-  const frames: string[][] = [], did: string[][] = [];
-  env.onRequest = request => {
-    const login = request.method === 'POST' && request.url.pathname.startsWith('/macros/') &&
-      (JSON.parse(request.body) as { action?: string }).action === 'login';
-    if (login || request.url.pathname.endsWith('/dispatches')) {
-      frames.push(env.screen.frame());
-      did.push(env.screen.steps.map(step => step.text));
-    }
-  };
-  await press('return');
-  const [signingIn] = frames.map(frame => frame.join('\n'));
-  const [signed, quenched] = did.map(steps => steps.join('\n'));
-  assert.match(signed ?? '', /Переключение: Вход в ChatGPT для нового воркера: своя сессия…/);
-  assert.match(signed ?? '', /Переключение: Общие правила перенесены: /);
-  assert.match(signingIn ?? '', /\nОткройте https:\/\/auth\.openai\.com\/codex\/device и введите код FAKE-\d+ \(код скопирован\)\nЕсли браузер не открылся: https:\/\/auth\.openai\.com\/codex\/device\n/);
-  assert.match(frames[0]?.at(-1) ?? '', /^Переключаем площадку… Esc — отменить {2}\d+:\d\d$/);
-  assert.match(quenched ?? '', /Переключение: Отзываем сессию ChatGPT старого воркера…/);
-  assert.match(frames[1]?.at(-1) ?? '', /^Запускаем воркер на GitHub… {2}\d+:\d\d$/, 'no Esc once the quench began');
-
-  assert.match(text(), /\n╭─ ВОРКЕР · Google Apps Script {3,}● активен\n/);
-  assert.match(text(), /\n[┃│] 12:\d\d {2}вы {2}Переключение: Воркер переключён/);
-  assert.match(text(), /обратного переключения\./);
-  assert.match(text(), /\n┃ Проверить сейчас {3}Починить {3}Пауза {3}Переключиться на GitHub Actions\n/);
-  assert.equal(env.screen.frame().at(-1), WORKER_HINT);
-});
-
-test('the frame of a refused switch: the reason in the journal, the worker active as before', async () => {
-  const env = await switchWorld('google');
-  const { world, press, text } = env;
-  world.chatgpt.credits.push(credit('reset-c', world.now + 20 * MINUTE));
-  world.chatgpt.lose = 'after';
-  env.google().gas?.tick();
-  world.chatgpt.lose = null;
-  await press('tab', 'right', 'right', 'right', 'return');
-  assert.match(text(), /\n╭─ ВОРКЕР · Google Apps Script {3,}● активен\n/);
-  assert.match(text(), /\n┃ Проверить сейчас {3}Починить {3}Пауза {3}Переключиться на GitHub Actions\n/, 'the cursor stays on the switch');
-  assert.equal(env.screen.frame().at(-1), WORKER_HINT);
-  await press('left'); // off the switch, so that the journal is over its caption
-  assert.match(text(), /\n[┃│] [\d:–]+ +вы +Переключение: Переключение отклонено: /);
-});
-
-test('the frame after Esc: the switch is stopped, the worker active with its session', async () => {
-  const env = await switchWorld('github');
-  const { press, text } = env;
-  env.onRequest = request => {
-    if (env.screen.stopSwitch && request.url.host === 'script.googleapis.com') void env.screen.press({ name: 'escape', sequence: '\x1b' });
-  };
-  await press('tab', 'right', 'right', 'right', 'return');
-  assert.match(text(), /\n╭─ ВОРКЕР · GitHub Actions {3,}● активен\n/);
-  assert.match(text(), /\n┃ Проверить сейчас {2}Починить {2}Пауза {2}Переключиться на Google Apps Script\n/);
-  assert.equal(env.screen.frame().at(-1), WORKER_HINT);
-  await press('left'); // off the switch, so that the journal is over its caption
-  assert.match(text(), /\n[┃│] [\d:–]+ +вы +Переключение: отменено по Esc/);
-  assert.match(text(), /\n[┃│] [\d:–]+ +вы +Переключение: Входим в Google…/);
-});
-
 test('in a narrow terminal the journal folds to its width and scrolls down to its oldest line', async () => {
   const { screen, press } = await opened();
   await press('tab');
@@ -932,62 +691,33 @@ test('in a narrow terminal the journal folds to its width and scrolls down to it
   screen.frame(40);
   await press('down', ...Array<string>(30).fill('pagedown'));
   const window = screen.frame(40).join('\n');
-  assert.match(window, /пробная проверка —/, 'the oldest run in view');
-  assert.match(window, /применять нечего/, 'the oldest run in view, folded under its column');
+  assert.match(window, /вход в ChatGPT — сессия/, 'the oldest run in view');
+  assert.match(window, /воркера обновлена/, 'the oldest run in view, folded under its column');
   assert.doesNotMatch(window, /Шаг 6/, 'the newest step scrolled away');
 });
 
-test('a paused worker is taken off pause first; ↑ from the first account goes nowhere', async () => {
-  const env = await switchWorld('github');
-  const { press, text } = env;
-  await press('tab', 'right', 'right', 'return');
-  assert.match(text(), /\n╭╌ ВОРКЕР · GitHub Actions {3,}● на паузе\n/);
-  assert.match(text(), /\n┃ Проверить сейчас {3}Починить {3}Снять с паузы\n/);
-  assert.doesNotMatch(text(), /Переключиться/);
-  await press('up', 'up', 'up'); // the row → ChatGPT → the account of the platform, and no further
-  assert.match(text(), /\n┃ GitHub {4}octo-fake/, '↑ from the first account stays there');
-  await press('left', 'right');
-  assert.match(text(), /\n┃ GitHub {4}octo-fake/, '← and → do nothing on the accounts');
-  assert.doesNotMatch(text(), /ЖУРНАЛ · /, 'no going round into the journal');
-});
-
-test('the screen «Воркер» in English names the switch', async () => {
-  const env = await switchWorld('google');
-  setLanguage('en');
-  try {
-    await env.press('tab', 'right', 'right', 'right');
-    assert.match(env.text(), /\n┃ Check now {3}Repair {3}Pause {3}Switch to GitHub Actions\n/);
-  } finally { setLanguage('ru'); }
-});
-
 test('the section ВОРКЕР on the resets: the label on the right, the detail under it, the link only in status', async () => {
-  const { world, mac, repo, screen, press, text, run } = await opened();
-  assert.match(text(), /\n╭─ ВОРКЕР · GitHub Actions {3,}● активен\n│ ждёт запуска по расписанию\n╰─\n/);
-  assert.doesNotMatch(text(), /https:\/\/github\.com\//, 'the screen has no link: the screen «Воркер» has it');
+  const { world, mac, project, gas, screen, text, run } = await opened();
+  assert.match(text(), /\n╭─ ВОРКЕР · Google Apps Script {3,}● активен\n│ ждёт запуска по расписанию\n╰─\n/);
+  assert.doesNotMatch(text(), /script\.google\.com\/home/, 'the screen has no link: the screen «Воркер» has it');
   const { io } = await run(status);
-  assert.match(io.output(), /\n╭─ ВОРКЕР · GitHub Actions {3,}● активен\n│ ждёт запуска по расписанию\n│ https:\/\/github\.com\/octo-fake\/codex-auto-resets-worker\n╰─$/,
-    'status keeps the link as the last line of the section');
+  assert.ok(io.output().endsWith(`\n╭─ ВОРКЕР · Google Apps Script${' '.repeat(33)}● активен\n│ ждёт запуска по расписанию\n` +
+    `│ https://script.google.com/home/projects/${project.scriptId}\n╰─`), 'status keeps the link as the last line of the section');
 
   // A pause: the label says it, the section has no detail line.
   const install = await mac.files.readInstall();
   assert.ok(install);
   await mac.files.writeInstall({ ...install, paused: true });
   await screen.load();
-  assert.match(text(), /\n╭╌ ВОРКЕР · GitHub Actions {3,}● на паузе\n╰╌\n/);
-
-  // An unfinished switch: the label is red, the detail says what is not finished.
-  await mac.files.writeInstall({ platform: 'github', switching: { from: 'google' }, accounts: install.accounts });
-  await screen.load();
-  assert.match(text(), /\n╭─ ВОРКЕР · GitHub Actions {3,}● нет активного воркера\n│ переключение не завершено\n╰─\n/);
+  assert.match(text(), /\n╭╌ ВОРКЕР · Google Apps Script {3,}● на паузе\n╰╌\n/);
   await mac.files.writeInstall(install);
 
   // A failed last run: the label names it in short, the detail carries the time.
   world.endSession('refresh_token_invalidated');
   world.advance(HOUR);
-  await world.github.schedule();
+  assert.throws(() => gas.tick(), 'the tick throws, so that Google mails the user');
   await screen.load();
-  assert.match(text(), /\n╭─ ВОРКЕР · GitHub Actions {3,}● ошибка запуска\n│ последний запуск с ошибкой · 20 окт 13:00\n╰─\n/);
-  assert.equal(repo.workflowState, 'active');
+  assert.match(text(), /\n╭─ ВОРКЕР · Google Apps Script {3,}● ошибка запуска\n│ последний запуск с ошибкой · 20 окт 13:00\n╰─\n/);
 });
 
 test('the caption of an action does not open by itself with the screen or after an action', async () => {
@@ -1003,20 +733,6 @@ test('the caption of an action does not open by itself with the screen or after 
   assert.equal(caption(screen.frame()), '', 'a new dwell starts');
   world.advance(400);
   assert.equal(caption(screen.frame()).startsWith('Заново залить'), true, 'and after 400 ms it opens');
-});
-
-test('a row of one action opens its caption by ← or → too: the cursor stays, the dwell starts', async () => {
-  const { world, screen, press, mac } = await opened();
-  const install = await mac.files.readInstall();
-  assert.ok(install);
-  await mac.files.writeInstall({ ...install, switching: { from: 'google' } });
-  await press('tab');
-  assert.equal(caption(screen.frame()), '', 'not with the screen');
-  await press('right');
-  world.advance(400);
-  assert.equal(caption(screen.frame()).startsWith('Довести переключение до конца'), true, screen.frame().join('\n'));
-  await press('left');
-  assert.equal(caption(screen.frame()).startsWith('Довести переключение до конца'), true, 'an open caption stays open');
 });
 
 // Issue 04: what moves on the screen, drawn from the moments the Screen keeps and the fake clock.
@@ -1054,27 +770,13 @@ test('the rule under the header counts down to the next scheduled run, and flash
 });
 const text = (screen: Screen): string => screen.frame().join('\n');
 
-test('on GitHub the last third of the wait is dashed; a pause dashes all of it, a switch tears it', async () => {
-  const { world, screen, mac } = await opened();
-  await world.github.schedule();
-  world.advance(6 * HOUR);
-  await world.github.schedule();
-  await screen.load();
-  world.advance(3 * HOUR);
-  assert.equal(screen.frame()[1], '━'.repeat(36) + '╸' + '─'.repeat(23) + '╌'.repeat(12), 'the time on GitHub is only expected');
-
+test('a pause dashes all of the rule under the header', async () => {
+  const { screen, mac } = await opened();
   const install = await mac.files.readInstall();
   assert.ok(install);
   await mac.files.writeInstall({ ...install, paused: true });
   await screen.load();
   assert.equal(screen.frame()[1], '╌'.repeat(72));
-  await mac.files.writeInstall({ ...install, switching: { from: 'google' } });
-  await screen.load();
-  assert.equal(screen.frame()[1], '───── '.repeat(12));
-  await screen.press({ name: 'tab', sequence: '\t' });
-  const torn = bracket(screen.frame(), 'ВОРКЕР');
-  assert.deepEqual(torn.map(line => line.charAt(0)), ['╭', '│', '│', ' ', '│', '│', ' ', '┃', '╰'],
-    `the bracket of the worker is torn: every third line without its rail\n${torn.join('\n')}`);
 });
 
 test('the runner of a read: it eases down the journal, leaves after the answer, stops yellow without one', async () => {
@@ -1157,7 +859,7 @@ test('the dot of an active worker breathes with motion; on pause the bracket is 
   assert.ok(install);
   await mac.files.writeInstall({ ...install, paused: true });
   await screen.load();
-  assert.match(text(screen), /\n╭╌ ВОРКЕР · GitHub Actions {3,}● на паузе\n╰╌\n/);
+  assert.match(text(screen), /\n╭╌ ВОРКЕР · Google Apps Script {3,}● на паузе\n╰╌\n/);
   const still = dot();
   world.advance(1000);
   assert.equal(dot(), still);
@@ -1173,16 +875,15 @@ test('the caption unrolls line by line after its dwell and rolls back up; withou
   assert.equal(caption(screen.frame()), '', 'the dwell has passed: only the rule is there yet');
   assert.match(text(screen), /\n│ {20}╍{8}\n/, 'and it is not drawn yet');
   world.advance(60);
-  assert.equal(caption(screen.frame()), 'Заново залить текущую версию воркера и вернуть расписание на этой', 'one line in 60 ms');
+  assert.equal(caption(screen.frame()), 'Заново залить текущую версию воркера и вернуть расписание. Сбросы,', 'one line in 60 ms');
   world.advance(120);
   assert.match(text(screen), /\n│ {20}━{8}\n/, 'the rule is drawn in 180 ms');
-  world.advance(60);
-  assert.equal(caption(screen.frame()), REPAIR_CAPTION, 'all four lines in 400 + 60·4 ms');
+  assert.equal(caption(screen.frame()), REPAIR_CAPTION, 'all three lines in 400 + 60·3 ms');
 
   await press('up');
   assert.equal(caption(screen.frame()), REPAIR_CAPTION, 'closing starts from all of it');
   world.advance(60);
-  assert.equal(screen.frame().filter(line => /^│ {3}\S/.test(line)).length, 3, 'a line goes in 60 ms, from the bottom');
+  assert.equal(screen.frame().filter(line => /^│ {3}\S/.test(line)).length, 2, 'a line goes in 60 ms, from the bottom');
   world.advance(180);
   assert.equal(caption(screen.frame()), '');
   assert.doesNotMatch(text(screen), /[━╍]{8}/, 'and the rule with the last one');

@@ -20,7 +20,7 @@ const GOOGLE_LOGIN = 'https://accounts.google.com/';
 // reset-a (in 5 days) and reset-b (in 2 days 3 hours).
 async function installed() {
   const env = await cliWorld();
-  const { code, io } = await env.run(setup, { answers: ['2'] });
+  const { code, io } = await env.run(setup);
   assert.equal(code, 0, io.output());
   const project = env.world.google.project();
   assert.ok(project?.gas);
@@ -28,11 +28,10 @@ async function installed() {
   const property = (key: string): unknown => JSON.parse(gas.properties.get(key) ?? 'null');
   const state = () => property('state') as { session: { refreshToken: string; accountId: string } };
   const journal = () => (property('journal') as { kind: string; outcome: string }[]);
-  // Only the web app is asked: no Google sign-in, no Apps Script API, no GitHub.
+  // Only the web app is asked: no Google sign-in, no Apps Script API.
   const requests = env.world.google.requests.length;
   const onlyWebApp = () => {
     assert.deepEqual(env.world.google.requests.slice(requests).filter(r => !r.url.includes('/macros/')), []);
-    assert.equal(env.world.github.requests.length, 0);
     assert.deepEqual(env.world.google.violations, []);
   };
   return { ...env, project, gas, property, state, journal, onlyWebApp };
@@ -118,7 +117,7 @@ test('a link of another signed-in Google account finds the project too', async (
   const { accounts: _accounts, ...install } = await mac.files.readInstall() ?? {};
   await mac.files.removeAll();
   keychain.entries.clear();
-  const { code, io } = await run(status, { answers: ['2', `https://script.google.com/u/1/home/projects/${project.scriptId}/edit`] });
+  const { code, io } = await run(status, { answers: [`https://script.google.com/u/1/home/projects/${project.scriptId}/edit`] });
   assert.equal(code, 0, io.output());
   assert.deepEqual(await mac.files.readInstall(), install);
 });
@@ -138,7 +137,7 @@ test('rules on Google switch a rule in the worker and leave this Mac as it is', 
   onlyWebApp();
 });
 
-test('a Mac without the install record asks where the worker is and finds it on Google by the link to its project', async () => {
+test('a Mac without the install record finds the worker on Google by the link to its project', async () => {
   const { world, mac, keychain, project, run } = await installed();
   // Another Mac: no files of the CLI and nothing in the Keychain, nor the emails of the accounts.
   const { accounts: _accounts, ...install } = await mac.files.readInstall() ?? {};
@@ -147,10 +146,10 @@ test('a Mac without the install record asks where the worker is and finds it on 
   world.google.projects.set('fake-other', { scriptId: 'fake-other', title: 'Мой проект', files: [], versions: [], deployments: new Map(),
     serving: null, granted: ['scriptapp', 'external_request'], consentAt: null, gas: null, loaded: null });
 
-  const { code, io } = await run(status, { answers: ['3', '2', `${link(project)}/edit`.replace(project.scriptId, 'nope'),
+  const { code, io } = await run(status, { answers: [`${link(project)}/edit`.replace(project.scriptId, 'nope'),
     `${link(project).replace(project.scriptId, 'fake-other')}/edit`, `${link(project)}/edit`] });
   assert.equal(code, 0, io.output());
-  assert.equal(io.asked.filter(question => question === 'Где искать? Введите 1 или 2: ').length, 2);
+  assert.equal(io.asked.filter(question => question.includes('1 или 2')).length, 0, 'there is no platform to choose');
   assert.match(io.output(), /Такого проекта в вашем аккаунте нет\./);
   assert.match(io.output(), /Это проект «Мой проект», а воркер — aures-worker\./);
   assert.ok(world.google.opened.includes(SCRIPT_HOME));
@@ -167,28 +166,28 @@ test('a Mac without the install record asks where the worker is and finds it on 
   assert.deepEqual(world.google.violations, []);
 });
 
-test('a Mac without the install record finds the worker on GitHub by its repository', async () => {
-  const env = await cliWorld();
-  assert.equal((await env.run(setup, { answers: ['1', ''] })).code, 0);
-  await env.mac.files.removeAll();
-  const { code, io } = await env.run(status, { answers: ['1'] });
-  assert.equal(code, 0, io.output());
-  assert.deepEqual(await env.mac.files.readInstall(), { platform: 'github' });
-  assert.match(io.lines.find(line => line.includes('github.com')) ?? '', /github\.com\/.*\/codex-auto-resets-worker$/);
-  assert.equal(env.world.google.requests.length, 0);
+test('a record of the removed GitHub platform counts as no install: the commands ask for setup and ask nothing', async () => {
+  const { run, mac } = await cliWorld();
+  await mac.files.write('install.json', { platform: 'github' });
+  for (const command of [status, applyNow, rules, login]) {
+    const { code, io } = await run(command);
+    assert.equal(code, 1);
+    assert.deepEqual(io.asked, []);
+    assert.equal(io.lines.at(-1), 'Воркер не установлен. Запустите `aures setup`.');
+  }
 });
 
 test('a project found without a deployment is left to setup, which goes on in it', async () => {
   const env = await cliWorld();
   env.world.google.apiEnabled = true;
   env.world.google.failNext = 'create_version';
-  assert.equal((await env.run(setup, { answers: ['2'] })).code, 1);
+  assert.equal((await env.run(setup)).code, 1);
   const project = env.world.google.project();
   assert.ok(project);
   await env.mac.files.removeAll();
   env.keychain.entries.delete('worker-secret');
 
-  const { code, io } = await env.run(rules, { answers: ['2', project.scriptId] });
+  const { code, io } = await env.run(rules, { answers: [project.scriptId] });
   assert.equal(code, 1);
   assert.equal(io.lines.at(-1), 'Установка не завершена. Запустите `aures setup`.');
   assert.deepEqual(await env.mac.files.readInstall(), { platform: 'google', google: { scriptId: project.scriptId } });

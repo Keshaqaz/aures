@@ -1,13 +1,11 @@
-// The worker of this install, wherever it runs (ADR-0007): what status, apply-now, rules, login
-// and the screen work with. The platform comes from the install record on this Mac and is
-// checked against the cloud; without a record the user says where to look, and the record is
-// written again. On Google the commands talk to the worker through doPost with the secret: they
-// need no Google sign-in.
+// The worker of this install, wherever it runs (ADR-0009): what status, apply-now, rules, login
+// and the screen work with. The platform is one, Google Apps Script, and the record of this Mac
+// names the project and the deployment; the commands talk to the worker through doPost with the
+// secret: they need no Google sign-in.
 import { GoogleFailure } from '../google/api.ts';
 import type { GoogleApi } from '../google/api.ts';
-import type { GitHubApi, Repository } from '../github/api.ts';
 import { PROJECT_TITLE, PROJECT_FILES, SCRIPT_HOME, secretOf } from '../apps-script/layout.ts';
-import { CommandFailed, WORKER_REPOSITORY, unfinished, connectGitHub, installedWorker } from './common.ts';
+import { CommandFailed, unfinished, notInstalled } from './common.ts';
 import type { CommandOptions, Printer } from './common.ts';
 import { connectGoogle, askWorker, workerDid, readSecret } from './google.ts';
 import type { WorkerReply } from './google.ts';
@@ -19,10 +17,9 @@ import { t } from './language.ts';
 
 // One doPost to the worker on Google; the reply is the one of a worker that did what it was asked.
 export type Ask = (action: string, extra?: Record<string, unknown>) => Promise<WorkerReply>;
-export interface GitHubWorker { platform: 'github'; api: GitHubApi; repo: Repository }
 // status() is doPost status: the reply that opened the worker the first time, a fresh one after.
 export interface GoogleWorker { platform: 'google'; scriptId: string; url: string; ask: Ask; status: () => Promise<WorkerReply> }
-export type Worker = GitHubWorker | GoogleWorker;
+export type Worker = GoogleWorker;
 
 // The rules as doPost status and rules give them: without their format.
 export const rulesOf = (given: unknown): Rules | null => {
@@ -39,18 +36,12 @@ export type OpenWorkerOptions = Omit<CommandOptions, 'io'> & { io: Printer & { p
 
 export async function openWorker(options: OpenWorkerOptions, command: string | null): Promise<Worker> {
   const { mac: { files } } = options;
+  // A record that names no worker on Google (ADR-0009) is no install: only setup can go on.
+  if (await files.foreignInstall()) throw new CommandFailed(notInstalled());
   const install = await files.readInstall() ?? await findWorker(options);
-  if ('api' in install) return install;
-  if (install.platform === 'github') return openGitHub(options);
   const { google } = install;
   if (!google?.url || !google.deploymentId) throw new CommandFailed(unfinished());
   return openGoogle(options, google.scriptId, google.url, command);
-}
-
-async function openGitHub({ fetch, keychain, io, open, copy, now = Date.now, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)) }:
-  OpenWorkerOptions): Promise<GitHubWorker> {
-  const github = await connectGitHub({ fetch, keychain, io, open, copy, now, sleep });
-  return { platform: 'github', api: github.api, repo: await installedWorker(github) };
 }
 
 // Why the worker on Google does not answer, and what the user does: setup, since the screen
@@ -80,22 +71,10 @@ async function openGoogle({ fetch, secretKeychain }: OpenWorkerOptions, scriptId
 }
 
 // Asks where the worker runs and finds it there; the record is written as soon as it is found.
-// On GitHub the worker found is the one opened.
-async function findWorker(options: OpenWorkerOptions): Promise<Install | GitHubWorker> {
-  const { io, mac: { files } } = options;
+async function findWorker(options: OpenWorkerOptions): Promise<Install> {
+  const { io } = options;
   io.print(t('This Mac does not know where the worker runs.', 'Этот Mac не знает, где работает воркер.'));
-  io.print(t(`  1. GitHub — the repository ${WORKER_REPOSITORY}`, `  1. GitHub — репозиторий ${WORKER_REPOSITORY}`));
-  io.print(t(`  2. Google Apps Script — the project ${PROJECT_TITLE}`, `  2. Google Apps Script — проект ${PROJECT_TITLE}`));
-  for (;;) {
-    const answer = (await io.prompt(t('Where to look? Type 1 or 2: ', 'Где искать? Введите 1 или 2: '))).trim();
-    if (answer === '1') {
-      // installedWorker tells when there is none; the record follows only a found one.
-      const worker = await openGitHub(options);
-      await files.writeInstall({ platform: 'github' });
-      return worker;
-    }
-    if (answer === '2') return findGoogle(options);
-  }
+  return findGoogle(options);
 }
 
 // The project from the link the user pastes: the Apps Script API lists no projects, and Drive

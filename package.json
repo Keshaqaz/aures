@@ -16,21 +16,13 @@
     "prepack": "npm run typecheck && npm run build:worker",
     "release:brew": "node scripts/release-brew.ts"
   },
-  "dependencies": {
-    "libsodium-wrappers": "0.7.15"
-  },
   "devDependencies": {
-    "@types/libsodium-wrappers": "0.7.14",
     "@types/node": "26.6.5",
     "esbuild": "0.25.10",
     "typescript": "7.0.2"
   },
   "files": [
     "src",
-    "dist/worker.mjs",
     "dist/apps-script/worker.js"
-  ],
-  "bundleDependencies": [
-    "libsodium-wrappers"
   ]
 }

@@ -1,5 +1,5 @@
 // The language of the CLI: the one the user picked with `l` on the screen or with
-// `aures language ru`, kept on this Mac in settings.json next to the watch files — or, until
+// `aures language ru`, kept on this Mac in settings.json next to the install record — or, until
 // the first pick, the language of the system (ru* → ru, anything else → en).
 import { spawn } from 'node:child_process';
 import type { ChildProcessByStdio } from 'node:child_process';

@@ -3,9 +3,9 @@ import type { ChildProcessByStdio } from 'node:child_process';
 import type { Readable, Writable } from 'node:stream';
 
 // The CLI's secrets in the macOS login Keychain: generic passwords of service
-// `codex-auto-resets`, one account each: the GitHub token, the Google refresh token and the
-// doPost secret of the worker on Apps Script. `security -i` reads its command from stdin, so a
-// secret never reaches argv, env or files.
+// `codex-auto-resets`, one account each: the Google refresh token and the doPost secret of the
+// worker on Apps Script; the GitHub token of earlier versions (ADR-0009) is only removed.
+// `security -i` reads its command from stdin, so a secret never reaches argv, env or files.
 export const KEYCHAIN_SERVICE = 'codex-auto-resets';
 export const GITHUB_TOKEN_ACCOUNT = 'github';
 export const GOOGLE_TOKEN_ACCOUNT = 'google';
@@ -71,8 +71,4 @@ export class KeychainEntry implements Keychain {
     const { code } = await this.run('delete-generic-password');
     if (code !== 0 && code !== NOT_FOUND) throw new KeychainUnavailable();
   }
-}
-
-export class GitHubTokenKeychain extends KeychainEntry {
-  constructor(options: KeychainOptions = {}) { super(GITHUB_TOKEN_ACCOUNT, options); }
 }

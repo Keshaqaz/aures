@@ -1,57 +1,28 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { mkdir, readFile, writeFile, rename, rm } from 'node:fs/promises';
-import type { Session } from '../chatgpt/session.ts';
 import type { Language } from './language.ts';
 
-// What the out-of-schedule check keeps on this Mac: the computer session and watch.json;
-// settings.json with the language of the CLI and install.json with the worker's platform live
-// next to them.
-// `security -i` cuts its command line at 4096 bytes and runs the rest as another command,
-// and a session (three JWTs) is over 4 KB of JSON, so it lives in a 0600 file, not in the
-// Keychain (ADR-0005).
+// What the CLI keeps on this Mac: settings.json with the language of the CLI and install.json
+// with the worker. The check from this Mac of earlier versions (ADR-0005) kept its session and
+// watch.json here too; they go with the folder at `uninstall` (removeAll).
 export const SUPPORT_DIR = join(homedir(), 'Library', 'Application Support', 'codex-auto-resets');
-const SESSION = 'chatgpt-session.json', STATE = 'watch.json', SETTINGS = 'settings.json', INSTALL = 'install.json';
-const SESSION_FIELDS = ['accessToken', 'refreshToken', 'accountId'] as const;
+const SETTINGS = 'settings.json', INSTALL = 'install.json';
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
-// idToken is not checked: the Mac never reads it.
-const isSession = (value: unknown): value is Session =>
-  object(value) && SESSION_FIELDS.every(key => typeof value[key] === 'string' && value[key]);
 
-// watch.json as the passes write it. Only its shape is checked when it is read: the passes
-// and status check the fields they use.
-export interface WatchState {
-  // The computer session is lost; setup clears it with a new one.
-  sessionLost?: boolean;
-  // The exhausted weekly window worker runs were started for: the latest at, count of them (none: 1).
-  dispatched?: { renewsAt: number; at: number; count?: number };
-  // The weekly quota as the last pass read it; null fields for a plan without a weekly window.
-  read?: { at: number; usedPercent: number | null; renewsAt: number | null };
-  lastPass?: { at: number; outcome: string };
-}
-
-export type Platform = 'github' | 'google';
-// Where the worker of this install lives (ADR-0007). On Google: its project as soon as it exists,
-// then the deployment and the URL of its web app.
+// Where the worker of this install lives (ADR-0009: the platform is one, Google Apps
+// Script). On Google: its project as soon as it exists, then the deployment and the URL of
+// its web app. An install record that names no worker on Google — one of the removed GitHub
+// platform — counts as no install at all.
+export interface Install { platform: 'google'; paused?: true; google?: GoogleWorker; accounts?: Accounts }
 export interface GoogleWorker { scriptId: string; deploymentId?: string; url?: string }
 // The accounts the screen «Воркер» names: the email of the Google account the CLI signed in to
 // and of the ChatGPT account of the worker session, as the sign-ins gave them. An email only:
 // never a token.
 export type Account = 'google' | 'chatgpt';
 export type Accounts = Partial<Record<Account, string>>;
-// paused is written only while it holds: the worker's schedule is off, so it is woken by no
-// check from this Mac; unpause drops the field.
-// switching is written by a switch of platform (ADR-0007) right before it starts quenching the
-// worker on `from`, with platform already the new one, and dropped once the new worker has its
-// schedule: while it is there no worker is active, and the screen «Воркер» offers to finish the
-// switch. quenched says the worker on `from` has no schedule and its session is revoked.
-export interface Switching { from: Platform; quenched?: true }
-export interface Install { platform: Platform; paused?: true; switching?: Switching; google?: GoogleWorker; accounts?: Accounts }
 const isGoogleWorker = (value: unknown): value is GoogleWorker => object(value) && typeof value.scriptId === 'string' &&
   ['deploymentId', 'url'].every(key => value[key] === undefined || typeof value[key] === 'string');
-const isPlatform = (value: unknown): value is Platform => value === 'github' || value === 'google';
-const switchingOf = (value: unknown): Switching | null => object(value) && isPlatform(value.from) ?
-  { from: value.from, ...value.quenched === true ? { quenched: true } : {} } : null;
 const accountsOf = (value: unknown): Accounts => Object.fromEntries((['google', 'chatgpt'] as const)
   .flatMap(account => object(value) && typeof value[account] === 'string' ? [[account, value[account]]] : []));
 
@@ -72,18 +43,6 @@ export class WatchFiles {
     await rename(aside, file);
   }
 
-  // The computer session, or null when there is none or it is not a session.
-  async readSession(): Promise<Session | null> {
-    const session = await this.read(SESSION);
-    return isSession(session) ? session : null;
-  }
-  async writeSession(session: Session): Promise<void> { await this.write(SESSION, session); }
-  // A broken watch.json counts as empty.
-  async readState(): Promise<WatchState> {
-    const state = await this.read(STATE);
-    return object(state) ? state : {};
-  }
-  async writeState(state: WatchState): Promise<void> { await this.write(STATE, state); }
   // The language the user picked, or null.
   async readLanguage(): Promise<unknown> {
     const settings = await this.read(SETTINGS);
@@ -93,13 +52,21 @@ export class WatchFiles {
     const settings = await this.read(SETTINGS);
     await this.write(SETTINGS, { ...object(settings) ? settings : {}, language });
   }
-  // null when there is no install record or it does not read.
+  // The install record of a worker on Google, or null when there is none: no record, one that
+  // does not parse, or one of the removed GitHub platform (ADR-0009), which counts as no
+  // install — see foreignInstall.
   async readInstall(): Promise<Install | null> {
     const install = await this.read(INSTALL);
-    if (!object(install) || !isPlatform(install.platform)) return null;
-    const accounts = accountsOf(install.accounts), switching = switchingOf(install.switching);
-    return { platform: install.platform, ...install.paused === true ? { paused: true } : {}, ...switching ? { switching } : {},
+    if (!object(install) || install.platform !== 'google') return null;
+    const accounts = accountsOf(install.accounts);
+    return { platform: 'google', ...install.paused === true ? { paused: true } : {},
       ...isGoogleWorker(install.google) ? { google: install.google } : {}, ...Object.keys(accounts).length ? { accounts } : {} };
+  }
+  // An install record is there, but it names no worker on Google: the GitHub platform of an
+  // earlier version (ADR-0009). It counts as no install, only `aures setup` can go on.
+  async foreignInstall(): Promise<boolean> {
+    const install = await this.read(INSTALL);
+    return object(install) && install.platform !== 'google';
   }
   async writeInstall(install: Install): Promise<void> { await this.write(INSTALL, install); }
   // Keeps the email of an account just signed in to in the install record; nothing without one.

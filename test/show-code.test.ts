@@ -6,16 +6,13 @@ import type { Printer } from '../src/cli/common.ts';
 import type { DeviceCode } from '../src/chatgpt/session.ts';
 import type { OpenUrl, CopyText } from '../src/cli/browser.ts';
 import { setLanguage } from '../src/cli/language.ts';
-import { setup } from '../src/cli/setup.ts';
-import { uninstall } from '../src/cli/uninstall.ts';
 import { fakeWorld } from './support/fake-world.ts';
-import { cliWorld } from './support/cli-world.ts';
 
 // Issue 23: a device-code login opens its page in the browser and copies the code to the
-// clipboard, for ChatGPT and GitHub alike; a browser or a clipboard that does not work changes
+// clipboard; a browser or a clipboard that does not work changes
 // nothing — the line with the code is printed anyway and the login goes on.
 setLanguage('ru');
-const DEVICE = 'https://auth.openai.com/codex/device', GITHUB_DEVICE = 'https://github.com/login/device';
+const DEVICE = 'https://auth.openai.com/codex/device';
 
 // A ChatGPT login that shows its code the way the CLI does, against the fake auth.openai.com:
 // the user enters the code after a few polls; sleeping moves the fake world's clock.
@@ -62,30 +59,4 @@ test('a browser or a clipboard that does not work changes nothing: the code is p
       `Если браузер не открылся: ${DEVICE}`,
     ], 'the code line stays, without the copied mark');
   }
-});
-
-test('the GitHub device login of setup opens the page and copies the code', async () => {
-  const env = await cliWorld();
-  const { code, io } = await env.run(setup, { answers: ['1', ''] });
-  assert.equal(code, 0, io.output());
-  assert.ok(env.world.google.opened.includes(GITHUB_DEVICE), 'the device page is opened');
-  assert.ok(env.world.google.opened.includes(DEVICE), 'the ChatGPT page is opened too');
-  assert.ok(env.copied.some(text => /^GHFK-\d+$/.test(text)), 'the GitHub code is copied');
-  assert.ok(env.copied.some(text => /^FAKE-\d+$/.test(text)), 'the ChatGPT code is copied too');
-  // The codes are what the user does in the stages of setup (issue 30); the addresses wait
-  // for a slow user.
-  assert.match(io.output(), /\[2\/5\] Вход в GitHub\n.*\n {6}→ код GHFK-\d+ \(скопирован\): подтвердите его в открывшемся браузере\n {6}✓ octo-fake\n/);
-  assert.match(io.output(), /\[4\/5\] Вход в ChatGPT\n.*\n {6}→ код FAKE-\d+ \(скопирован\): подтвердите его в открывшемся браузере\n/);
-  assert.doesNotMatch(io.output(), /Если браузер не открылся/);
-});
-
-test('the GitHub device login of uninstall opens the page and copies the code', async () => {
-  const env = await cliWorld();
-  await env.run(setup, { answers: ['1', ''] });
-  const opened = env.world.google.opened.length, copied = env.copied.length;
-  const { code, io } = await env.run(uninstall, { answers: ['y'] });
-  assert.equal(code, 0, io.output());
-  assert.deepEqual(env.world.google.opened.slice(opened), [GITHUB_DEVICE]);
-  assert.ok(env.copied.slice(copied).some(text => /^GHFK-\d+$/.test(text)), 'the code is copied');
-  assert.match(io.output(), /Для удаления репозитория[\s\S]*Откройте https:\/\/github\.com\/login\/device и введите код GHFK-\d+ \(код скопирован\)/);
 });
