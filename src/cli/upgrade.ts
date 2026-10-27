@@ -1,6 +1,6 @@
 import pkg from '../../package.json' with { type: 'json' };
 import { GoogleFailure } from '../google/api.ts';
-import { CommandFailed, unfinished, notInstalled, command } from './common.ts';
+import { CommandFailed, unfinished, notInstalledOn, command } from './common.ts';
 import type { CommandOptions, Sleep } from './common.ts';
 import { connectGoogle, deployWorker, askAfterDeploy, workerDid, readSecret } from './google.ts';
 import type { GoogleWorker } from './mac-files.ts';
@@ -22,7 +22,7 @@ export async function upgrade(options: UpgradeOptions): Promise<number> {
   return command('upgrade', io, async () => {
     await removeCheckLeftovers(mac);
     const install = await mac.files.readInstall();
-    if (!install) throw new CommandFailed(notInstalled());
+    if (!install) throw new CommandFailed(await notInstalledOn(mac.files));
     await redeployGoogle({ ...options, now, sleep }, install.google);
     io.print(updatedLine());
     return 0;

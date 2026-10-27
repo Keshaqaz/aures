@@ -64,6 +64,12 @@ export const githubRepoStep = (): string => t('delete the repository codex-auto-
 export const unfinished = (): string => t('Setup is not finished. Run `aures setup`.', 'Установка не завершена. Запустите `aures setup`.');
 // The install record names no worker on Google (ADR-0009): there is no install to work with.
 export const notInstalled = (): string => t('The worker is not installed. Run `aures setup`.', 'Воркер не установлен. Запустите `aures setup`.');
+// The same, on the record this Mac has. A GitHub record of an earlier version adds its
+// repository: this is the first thing the user of that version sees after `brew upgrade`
+// (`aures`, `status`, `upgrade`), and the worker of that version keeps running while the
+// repository is there. files tell the record apart.
+export const notInstalledOn = async (files: Pick<MacFiles, 'githubInstall'>): Promise<string> =>
+  await files.githubInstall() ? `${notInstalled()}\n${capitalized(githubRepoStep())}` : notInstalled();
 
 // Answers that confirm a one-way action.
 export const YES = ['y', 'yes', 'д', 'да'];

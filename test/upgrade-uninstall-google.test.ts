@@ -170,6 +170,18 @@ test('upgrade with no install to upgrade still removes what the check from this 
   assert.equal(await mac.files.read('watch.json'), null);
 });
 
+// `aures upgrade` after `brew upgrade` is where a user of the GitHub version lands first
+// (ADR-0009): no worker of this install, and the worker of that version keeps running until
+// its repository is gone.
+test('upgrade over a GitHub record names the repository its worker still runs from', async () => {
+  const { run, mac } = await cliWorld();
+  await mac.files.write('install.json', { platform: 'github' });
+  const { code, io } = await run(upgrade);
+  assert.equal(code, 1, io.output());
+  assert.deepEqual(io.lines.slice(-2), ['Воркер не установлен. Запустите `aures setup`.',
+    REPO_STEP.charAt(0).toUpperCase() + REPO_STEP.slice(1)]);
+});
+
 test('uninstall removes what earlier versions left: the agent and log of the check from this Mac, its files and the GitHub sign-in', async () => {
   const { mac, keychain, project, run } = await onGoogle();
   await leftoverCheck(mac);

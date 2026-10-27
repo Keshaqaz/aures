@@ -5,7 +5,7 @@
 import { GoogleFailure } from '../google/api.ts';
 import type { GoogleApi } from '../google/api.ts';
 import { PROJECT_TITLE, PROJECT_FILES, SCRIPT_HOME, secretOf } from '../apps-script/layout.ts';
-import { CommandFailed, unfinished, notInstalled } from './common.ts';
+import { CommandFailed, unfinished, notInstalledOn } from './common.ts';
 import type { CommandOptions, Printer } from './common.ts';
 import { connectGoogle, askWorker, workerDid } from './google.ts';
 import type { WorkerReply } from './google.ts';
@@ -37,7 +37,7 @@ export type OpenWorkerOptions = Omit<CommandOptions, 'io'> & { io: Printer & { p
 export async function openWorker(options: OpenWorkerOptions, command: string | null): Promise<Worker> {
   const { mac: { files } } = options;
   // A record that names no worker on Google (ADR-0009) is no install: only setup can go on.
-  if (await files.foreignInstall()) throw new CommandFailed(notInstalled());
+  if (await files.foreignInstall()) throw new CommandFailed(await notInstalledOn(files));
   const install = await files.readInstall() ?? await findWorker(options);
   const { google } = install;
   if (!google?.url || !google.deploymentId) throw new CommandFailed(unfinished());

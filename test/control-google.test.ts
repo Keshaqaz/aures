@@ -175,15 +175,28 @@ test('a Mac without the install record finds the worker on Google by the link to
   assert.deepEqual(world.google.violations, []);
 });
 
-test('a record of the removed GitHub platform counts as no install: the commands ask for setup and ask nothing', async () => {
+// A record of the removed GitHub platform counts as no install, and names the repository its
+// worker still runs from (ADR-0009) — the first thing a user of that version sees after
+// `brew upgrade`.
+test('a record of the removed GitHub platform counts as no install: the commands ask for setup and name its repository', async () => {
   const { run, mac } = await cliWorld();
   await mac.files.write('install.json', { platform: 'github' });
   for (const command of [status, applyNow, rules, login]) {
     const { code, io } = await run(command);
-    assert.equal(code, 1);
+    assert.equal(code, 1, io.output());
     assert.deepEqual(io.asked, []);
-    assert.equal(io.lines.at(-1), 'Воркер не установлен. Запустите `aures setup`.');
+    assert.deepEqual(io.lines, ['Воркер не установлен. Запустите `aures setup`.',
+      'Удалите репозиторий codex-auto-resets-worker в своём аккаунте GitHub ' +
+      '(https://github.com/settings/repositories): пока он есть, воркер прежней версии продолжает работать по расписанию и применять сбросы']);
   }
+});
+
+test('a foreign record that is not GitHub says nothing of a repository', async () => {
+  const { run, mac } = await cliWorld();
+  await mac.files.write('install.json', { platform: 'gitlab' });
+  const { code, io } = await run(status);
+  assert.equal(code, 1);
+  assert.deepEqual(io.lines, ['Воркер не установлен. Запустите `aures setup`.']);
 });
 
 test('a project found without a deployment is left to setup, which goes on in it', async () => {
