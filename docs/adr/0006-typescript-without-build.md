@@ -10,7 +10,7 @@ Status: accepted
 - `node` и `node --test` запускают `.ts` напрямую. Brew-архив содержит `.ts` как есть, формула запускает `src/cli/main.ts`. Worker по-прежнему собирает esbuild в один `dist/worker.mjs` под Node раннера.
 - Допускается только синтаксис, который Node умеет стереть (`erasableSyntaxOnly`): без `enum`, `namespace` и parameter properties в конструкторах. Импорты пишутся с расширением `.ts` (`allowImportingTsExtensions`), импорты только типов — через `import type` (`verbatimModuleSyntax`).
 - `tsconfig`: `strict`, `noUncheckedIndexedAccess`, `noImplicitOverride`, `noFallthroughCasesInSwitch`; `exactOptionalPropertyTypes` выключен. `any` не используется.
-- `npm run typecheck` (`tsc --noEmit`) запускается в CI и в `prepack`, так что релиз с ошибками типов не собирается.
+- `npm run typecheck` (`tsc --noEmit`) запускается в `prepack`, так что релиз с ошибками типов не собирается.
 - Ответы ChatGPT и файлы состояния (зашифрованный state, секрет входа, правила, сессия компьютера, `watch.json`) после `JSON.parse` имеют тип `unknown` и сужаются уже существующими ручными проверками, потому что от их формы зависит применение сброса. Ответы GitHub API и `summary.json` только типизируются. Библиотек валидации нет: они попали бы в bundle worker'а и в `bundleDependencies`.
 
 **Отвергнуто.**
