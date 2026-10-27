@@ -1,5 +1,5 @@
 import { BEFORE_EXPIRY_MS, TICK_MINUTES } from '../apps-script/layout.ts';
-import type { JournalEntry } from '../apps-script/worker.ts';
+import type { JournalEntry, RunOutcome } from '../apps-script/worker.ts';
 import type { Rules } from '../worker/state-file.ts';
 import type { Summary } from '../worker/summary.ts';
 import { resetName, ruleLabel, reasonText, attemptResult, byDeadline, failedRunAdvice } from './common.ts';
@@ -79,8 +79,7 @@ type WorkerState = { tone: Tone; label: string; detail?: string | null; warning?
 // state stay. With no pause timer every reset left to itself burns at its deadline, so the
 // warning stands and «Применить сейчас» is the only thing that still applies (ADR-0007).
 const pausedWorker = (): WorkerState => ({
-  tone: 'warn',
-  label: t('paused', 'на паузе'),
+  ...workerLabel('paused'),
   warning: t('The worker is paused: resets are not applied and each burns at its activation deadline. «Apply now» still works.',
     'Воркер на паузе: сбросы не применяются и каждый сгорит в свой срок активации. «Применить сейчас» продолжает работать.'),
 });
@@ -154,29 +153,60 @@ export function railed(lines: Segment[][], from: number, rail: Rail): void {
   }
 }
 
+// What the mark needs of a journal entry: when the run started, what started it and how it
+// ended — the entries the CLI reads may hold null while a run is not finished.
+export interface MarkedEntry { at: string; kind: string; outcome: RunOutcome | null }
+
+// What the worker is by the pause, the schedule and its journal, as of the read (CONTEXT.md,
+// «Активный воркер»): one place decides the label beside the dot and its tone, for the overview
+// and for the screen «Воркер» alike. silent: the schedule is on, but no scheduled run for over
+// the before-expiry window.
+export type WorkerMark = 'paused' | 'no_schedule' | 'not_run' | 'failed' | 'silent' | 'active';
+export function workerMark({ paused, schedule, journal, readAt }: { paused: boolean; schedule: boolean;
+  journal: MarkedEntry[]; readAt: number }): WorkerMark {
+  if (paused) return 'paused';
+  if (!schedule) return 'no_schedule';
+  const last = journal.at(-1);
+  if (!last) return 'not_run';
+  if (last.outcome !== null && USER_MENDS.includes(last.outcome)) return 'failed';
+  const scheduledAt = lastScheduled(journal);
+  return scheduledAt !== null && readAt - scheduledAt > BEFORE_EXPIRY_MS ? 'silent' : 'active';
+}
+
+// The label of the worker in its section and the tone of its dot, by its mark.
+export function workerLabel(mark: WorkerMark): { tone: Tone; label: string } {
+  return ({
+    paused: { tone: 'warn', label: t('paused', 'на паузе') },
+    no_schedule: { tone: 'bad', label: t('no schedule', 'нет расписания') },
+    not_run: { tone: 'warn', label: t('not run yet', 'ещё не запускался') },
+    failed: { tone: 'bad', label: t('last run failed', 'ошибка запуска') },
+    silent: { tone: 'warn', label: t('no scheduled run', 'нет запусков по расписанию') },
+    active: { tone: 'ok', label: t('active', 'активен') },
+  } as Record<WorkerMark, { tone: Tone; label: string }>)[mark];
+}
+
 // On Google by the schedule and the journal: the latest run of any kind, and the latest scheduled one.
 function googleState({ scriptId, schedule, journal }: WorkerView, readAt: number, timeZone?: string,
   now = readAt): WorkerState {
-  if (!schedule) {
-    return { tone: 'bad', label: t('no schedule', 'нет расписания'),
+  const mark = workerMark({ paused: false, schedule, journal, readAt });
+  const last = journal.at(-1);
+  if (mark === 'no_schedule') {
+    return { ...workerLabel(mark),
       warning: t('Resets are not applied. Repair the worker: «Repair» on the screen «Worker» (Tab in `aures`) puts the schedule back.',
         'Сбросы не применяются. Почините воркер: «Починить» на экране «Воркер» (Tab в `aures`) вернёт расписание.') };
   }
-  const last = journal.at(-1);
-  if (!last) return { tone: 'warn', label: t('not run yet', 'ещё не запускался') };
-  if (USER_MENDS.includes(last.outcome)) {
+  if (mark === 'failed' && last) {
     const at = shortTime(Date.parse(last.at), timeZone);
-    return { tone: 'bad', label: t('last run failed', 'ошибка запуска'),
-      detail: t(`last run failed · ${at}`, `последний запуск с ошибкой · ${at}`) };
+    return { ...workerLabel(mark), detail: t(`last run failed · ${at}`, `последний запуск с ошибкой · ${at}`) };
   }
-  const scheduled = journal.findLast(entry => entry.kind === 'scheduled');
-  const scheduledAt = scheduled ? Date.parse(scheduled.at) : null;
-  if (scheduledAt !== null && readAt - scheduledAt > BEFORE_EXPIRY_MS) {
-    const silent = Math.floor((readAt - scheduledAt) / 3600_000);
-    return { tone: 'warn', label: t('no scheduled run', 'нет запусков по расписанию'), detail: t(`none for ${silent}h`, `уже ${silent} ч`),
+  if (mark === 'silent') {
+    const silent = Math.floor((readAt - (lastScheduled(journal) ?? readAt)) / 3600_000);
+    return { ...workerLabel(mark), detail: t(`none for ${silent}h`, `уже ${silent} ч`),
       warning: t(`Google has not run the worker on schedule for ${silent}h, and the before-expiry rule depends on it. Check: ${executions(scriptId)}`,
         `Google не запускал воркер по расписанию уже ${silent} ч, а правило перед истечением зависит от этих запусков. Проверьте: ${executions(scriptId)}`) };
   }
+  if (mark === 'not_run') return workerLabel(mark);
+  const scheduledAt = lastScheduled(journal);
   return nextRun(scheduledAt === null ? null : scheduledAt + TICK_MINUTES * 60_000, now);
 }
 
@@ -239,6 +269,11 @@ export function renderOverview(model: Overview, { now, timeZone, width = WIDTH, 
   };
 
   lines.push(headerLine({ now, timeZone, width, toggle }), ruleLine(model, { now, width }), []);
+  // A worker that cannot apply resets — on pause, without its schedule, or with a last run only
+  // the user can mend — leaves a reset with a deadline to burn, like the pause does: the warning
+  // under the section says the same moment why the rules do not run.
+  const mark = workerMark({ paused: model.paused, schedule: model.worker.schedule, journal: model.worker.journal, readAt: model.readAt });
+  const burns = model.paused || mark === 'no_schedule' || mark === 'failed';
   const resetsTitle = t('RESETS', 'СБРОСЫ'), resets = model.resets ?? [];
   open([[resetsTitle, S.bold], ...(resets.length ? [[` · ${resets.length}`, S.dim]] as Segment[] : [])]);
   if (!model.resets) lines.push([rail(), [t('not read yet — the worker reads them on its next run', 'ещё не прочитаны — воркер прочитает их при следующем запуске'), S.dim]]);
@@ -248,9 +283,10 @@ export function renderOverview(model: Overview, { now, timeZone, width = WIDTH, 
     const selected = at({ kind: 'reset', creditId: reset.creditId });
     const expiresAt = reset.expiresAt ? Date.parse(reset.expiresAt) : null;
     // On pause no rule applies anything, so every reset with a deadline waits only to burn; one
-    // without a deadline cannot burn and keeps its «no expiry».
+    // without a deadline cannot burn and keeps its «no expiry». So does a worker that cannot
+    // apply resets: without a schedule, or with a last run only the user can mend.
     const status: Segment = expiresAt === null ? ['', ''] : expiresAt <= now() ? [t('expired', 'срок вышел'), S.dim] :
-      model.paused ? [t('burns', 'сгорит'), S.yellow] :
+      burns ? [t('burns', 'сгорит'), S.yellow] :
       model.rules?.beforeExpiry && expiresAt - now() <= BEFORE_EXPIRY_MS ? [t('applies soon', 'скоро применится'), S.yellow] :
         [timeLeft(expiresAt - now()), S.dim];
     lines.push(spread([rail(selected), [resetName(reset.creditId).padEnd(idWidth + 3), selected ? S.cyan : ''], status],

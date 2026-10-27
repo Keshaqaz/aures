@@ -720,6 +720,27 @@ test('the section ВОРКЕР on the resets: the label on the right, the detail
   assert.match(text(), /\n╭─ ВОРКЕР · Google Apps Script {3,}● ошибка запуска\n│ последний запуск с ошибкой · 20 окт 13:00\n╰─\n/);
 });
 
+// A reset inside the last hour before its deadline is marked «скоро применится» only when the
+// worker can apply it: without a schedule, or with a last run only the user can mend, it burns,
+// as on a pause (issue 03). The warning under the section says the same moment why.
+test('a reset near its deadline burns while the worker cannot apply it, applies soon when it can', async () => {
+  const { world, screen } = await opened();
+  const model = screen.model;
+  assert.ok(model);
+  const near: Overview = { ...model, resets: [{ creditId: 'reset-due', expiresAt: new Date(world.now + 30 * MINUTE).toISOString() }] };
+  const row = (over: Overview): string => renderOverview(over, { now: () => world.now, timeZone: 'UTC' })
+    .map(line => line.map(([text]) => text).join('')).find(line => line.includes('reset-due')) ?? '';
+  assert.match(row(near), /скоро применится/, 'an active worker applies it soon');
+  assert.match(row({ ...near, worker: { ...near.worker, schedule: false } }), /сгорит/,
+    'no schedule: the reset burns');
+  const lost = { ...near.worker, journal: [...near.worker.journal,
+    { at: new Date(world.now - MINUTE).toISOString(), kind: 'scheduled' as const, outcome: 'reauth_required' as const, durationMs: 0 }] };
+  assert.match(row({ ...near, worker: lost }), /сгорит/, 'the last run needs the user: the reset burns');
+  for (const burned of [{ ...near, worker: { ...near.worker, schedule: false } }, { ...near, worker: lost }]) {
+    assert.doesNotMatch(row(burned), /скоро применится/, 'not «applies soon» while it burns');
+  }
+});
+
 test('the caption of an action does not open by itself with the screen or after an action', async () => {
   const { world, screen, press } = await opened();
   await press('tab');

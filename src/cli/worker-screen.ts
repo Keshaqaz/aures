@@ -10,7 +10,7 @@ import { projectUrl } from './active-worker.ts';
 import type { Worker } from './active-worker.ts';
 import type { Mac } from './common.ts';
 import { resetName, reasonText } from './common.ts';
-import { shortTime, railed, S, WIDTH, PLATFORM_NAME } from './overview.ts';
+import { shortTime, railed, S, WIDTH, PLATFORM_NAME, workerMark, workerLabel } from './overview.ts';
 import type { Segment, Tone } from './overview.ts';
 import type { Summary } from '../worker/summary.ts';
 import { fit } from './fit.ts';
@@ -134,12 +134,12 @@ function captionLines(text: string, width: number): Segment[][] {
 export const captionHeight = (item: WorkerItem, paused: boolean, width = WIDTH): number =>
   item === 'platformAccount' || item === 'chatgpt' ? 0 : captionLines(itemCaption(item, paused), width - 4).length;
 
-// The worker in the heading of its section: the label beside the dot on the right (issue 03).
-// failed: the overview says the last run failed (issue 04).
-function pageState({ paused }: Pick<WorkerPage, 'paused'>, failed: boolean): { tone: Tone; label: string } {
-  if (paused) return { tone: 'warn', label: t('paused', 'на паузе') };
-  if (failed) return { tone: 'bad', label: t('last run failed', 'ошибка запуска') };
-  return { tone: 'ok', label: t('active', 'активен') };
+// The worker in the heading of its section (issue 03): the same label and tone as the overview,
+// by the pause of the record and the schedule and journal the page read — not «active» whatever
+// happened to the schedule.
+function pageState(page: WorkerPage): { tone: Tone; label: string } {
+  return workerLabel(workerMark({ paused: page.paused, schedule: page.journal?.schedule ?? true,
+    journal: page.journal?.entries ?? [], readAt: page.journal?.readAt ?? page.polledAt }));
 }
 
 // «1 проверка, 3 проверки, 5 проверок, 21 проверка» — the Russian word by the count.
@@ -290,15 +290,15 @@ export function journalWindow(page: WorkerPage, steps: Step[], { timeZone, width
 // header is the top line, the same as on the overview, rule the line under it (ruleLine). rows is
 // the height of the journal window (journalHeight), offset how far it is scrolled in visual lines,
 // focus whether the cursor stands in the journal, caption whether the caption of the action under
-// the cursor is open, lastApplied the application the summary names for the journal, failed
-// whether the overview says the last run failed. now tells today, for the time of a run. A caption
-// that unrolls (issue 04) names its item, the part of its rule drawn (0–1) and its lines shown.
+// the cursor is open, lastApplied the application the summary names for the journal. now tells
+// today, for the time of a run. A caption that unrolls (issue 04) names its item, the part of its
+// rule drawn (0–1) and its lines shown.
 export interface Unrolled { item: WorkerItem; rule: number; lines: number }
 export interface WorkerRenderOptions { timeZone?: string; width?: number; cursor: number; steps: Step[]; header: Segment[];
   rule?: Segment[]; now: () => number; rows: number; offset?: number; focus?: boolean; caption?: boolean | Unrolled | null;
-  lastApplied?: Summary['lastApplied']; failed?: boolean }
+  lastApplied?: Summary['lastApplied'] }
 export function renderWorker(page: WorkerPage, { timeZone, width = WIDTH, cursor, steps, header, rule = [['─'.repeat(width), S.dim]], now,
-  rows, offset = 0, focus = false, caption = false, lastApplied = null, failed = false }: WorkerRenderOptions): Segment[][] {
+  rows, offset = 0, focus = false, caption = false, lastApplied = null }: WorkerRenderOptions): Segment[][] {
   const lines: Segment[][] = [header, rule, []];
   const items = workerItems();
   const selected = (item: WorkerItem) => items[cursor] === item;
@@ -308,7 +308,7 @@ export function renderWorker(page: WorkerPage, { timeZone, width = WIDTH, cursor
 
   // The section «ВОРКЕР»: the state on the right of the heading, the link, the accounts and the
   // actions in one row, the caption of the action under the cursor, all in one bracket.
-  const state = pageState(page, failed), heading = lines.length;
+  const state = pageState(page), heading = lines.length;
   lines.push(spread([['╭─ ', S.dim], [t('WORKER', 'ВОРКЕР'), S.bold], [` · ${PLATFORM_NAME}`, S.dim]],
     [['● ', TONES[state.tone]], [state.label, TONES[state.tone]]], width));
   lines.push([rail(), [page.link, S.dim]], [['│', S.dim]]);

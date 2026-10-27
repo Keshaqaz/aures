@@ -19,7 +19,8 @@ const run = (time: string, kind: JournalEntry['kind'], outcome: JournalEntry['ou
 const page = (over: Partial<WorkerPage> = {}): WorkerPage => ({
   link: 'https://script.google.com/home/projects/your-script-id', paused: false,
   account: 'you@gmail.com', accounts: { chatgpt: 'you@gmail.com' }, googleSignIn: true,
-  journal: { entries: [], readAt: NOW, responseMs: 400 }, polledAt: Date.parse('2026-10-26T12:42:30Z'), failed: null, ...over });
+  journal: { schedule: true, entries: [], readAt: NOW, responseMs: 400 },
+  polledAt: Date.parse('2026-10-26T12:42:30Z'), failed: null, ...over });
 const render = (p: WorkerPage, over: Partial<WorkerRenderOptions> = {}): Segment[][] =>
   renderWorker(p, { header: [['aures', S.bold]], cursor: FIRST_ACTION, steps: [], rows: 4, now: () => NOW, timeZone: 'UTC', ...over });
 const plain = (lines: Segment[][]): string[] => lines.map(line => line.map(([text]) => text).join(''));
@@ -36,7 +37,7 @@ test('the frame of the screen «Воркер»: one bracket for the worker, one 
     'aures',
     '─'.repeat(72),
     '',
-    `╭─ ВОРКЕР · Google Apps Script${' '.repeat(33)}● активен`,
+    `╭─ ВОРКЕР · Google Apps Script${' '.repeat(23)}● ещё не запускался`,
     '│ https://script.google.com/home/projects/your-script-id',
     '│',
     `│ Google    you@gmail.com · вход работает${' '.repeat(19)}войти заново`,
@@ -62,11 +63,27 @@ test('on pause: the label and the actions that apply', () => {
   assert.doesNotMatch(plain(render(page())).join('\n'), /Переключ/, 'there is no platform to switch to');
 });
 
+// The state of the worker on its screen is the one of the overview (issue 03): by the pause, the
+// schedule and the journal the page read, not «active» whatever happened to the schedule.
+test('the state of the worker: no schedule in red, no scheduled run in yellow, the pause over both', () => {
+  const old = [run('11:00', 'scheduled', 'idle')]; // an hour and 42 minutes before the read
+  const state = (over: Partial<WorkerPage>): (Segment | undefined)[] => {
+    const heading = render(page(over))[3] ?? [];
+    return [heading.at(-2), heading.at(-1)];
+  };
+  assert.deepEqual(state({ journal: { schedule: false, entries: [], readAt: NOW, responseMs: 400 } }),
+    [['● ', S.red], ['нет расписания', S.red]], 'no schedule: resets are not applied');
+  assert.deepEqual(state({ journal: { schedule: true, entries: old, readAt: NOW, responseMs: 400 } }),
+    [['● ', S.yellow], ['нет запусков по расписанию', S.yellow]], 'no scheduled run for over an hour');
+  assert.deepEqual(state({ paused: true, journal: { schedule: false, entries: old, readAt: NOW, responseMs: 400 } }),
+    [['● ', S.yellow], ['на паузе', S.yellow]], 'the pause comes first');
+});
+
 test('in English the same frame', () => {
   setLanguage('en');
   try {
     const lines = plain(render(page()));
-    assert.match(lines[3] ?? '', /^╭─ WORKER · Google Apps Script {3,}● active$/);
+    assert.match(lines[3] ?? '', /^╭─ WORKER · Google Apps Script {3,}● not run yet$/);
     assert.match(lines[6] ?? '', /^│ Google {4}you@gmail\.com · signed in {3,}sign in again$/);
     assert.match(lines[7] ?? '', /^│ ChatGPT {3}you@gmail\.com · signed in {3,}sign in again$/);
     assert.equal(lines[9], '┃ Check now   Repair   Pause');
@@ -80,7 +97,7 @@ test('the journal columns: when, who started it and what came of it', () => {
     run('12:00', 'login', 'idle', 200), run('12:00', 'trial', 'idle', 300),
     ...['12:10', '12:15', '12:20', '12:25', '12:30', '12:35', '12:40'].map(time => run(time, 'scheduled', 'idle')),
   ];
-  const p = page({ journal: { entries, readAt: NOW, responseMs: 400 } });
+  const p = page({ journal: { schedule: true, entries, readAt: NOW, responseMs: 400 } });
   const lines = render(p, { steps: [{ at: NOW + 60_000, text: 'воркер залит заново', tone: 'ok' }] });
   assert.deepEqual(plain(lines).slice(WINDOW, WINDOW + 4), [
     `│ ${row('12:43', 'вы', 'воркер залит заново', 11, 10)}`,
@@ -101,7 +118,7 @@ test('what a run came to, by its outcome, in the tone it deserves', () => {
     run('12:10', 'scheduled', 'broken_state', 800, { reason: 'chatgpt' }),
     run('12:05', 'mac', 'idle'), run('12:00', 'trial', 'would_apply', 800),
   ];
-  const p = page({ journal: { entries, readAt: NOW, responseMs: 400 } });
+  const p = page({ journal: { schedule: true, entries, readAt: NOW, responseMs: 400 } });
   const lines = render(p, { rows: 5 });
   assert.deepEqual(lines.slice(WINDOW, WINDOW + 5).map(line => line.slice(2)), [
     [['расписание'.padEnd(12), S.dim], ['ChatGPT не ответил — повтор при следующем запуске', S.yellow]],
@@ -116,7 +133,7 @@ test('an applied run names its reset when the summary says it is the one of that
   const lastApplied = { creditId: 'RateLimitResetCredit_0eb466b3212c819193799a1741f067f8', reason: 'before_expiry' as const,
     at: at('12:05') };
   const entries = [run('12:20', 'apply_now', 'applied', 800), run('12:05', 'apply_now', 'applied', 400)];
-  const p = page({ journal: { entries, readAt: NOW, responseMs: 400 } });
+  const p = page({ journal: { schedule: true, entries, readAt: NOW, responseMs: 400 } });
   const lines = render(p, { rows: 2, lastApplied });
   assert.deepEqual(lines[WINDOW]?.slice(2), [['вы'.padEnd(4), S.cyan], ['«Применить сейчас» — сброс применён', S.green]],
     'a run the application does not name stays unnamed');
@@ -131,7 +148,7 @@ test('the quiet runs of one kind collapse into one line, and only they do', () =
     run('12:05', 'scheduled', 'applied', 800), run('12:10', 'scheduled', 'applied', 800),
     ...['12:15', '12:20', '12:25'].map(time => run(time, 'trial', 'idle', 300)),
   ];
-  const p = page({ journal: { entries, readAt: NOW, responseMs: 400 } });
+  const p = page({ journal: { schedule: true, entries, readAt: NOW, responseMs: 400 } });
   assert.equal(journalWindow(p, [], { timeZone: 'UTC', now: () => NOW }).length, 5,
     'what is not quiet does not collapse');
   const rows = plain(render(p, { rows: 4 })).slice(WINDOW, WINDOW + 4);
@@ -146,7 +163,7 @@ test('the quiet runs of one kind collapse into one line, and only they do', () =
 test('the Russian count of collapsed checks: 3 проверки, 5 проверок, 11 проверок, 21 проверка', () => {
   for (const [n, word] of [[3, 'проверки'], [5, 'проверок'], [11, 'проверок'], [21, 'проверка']] as const) {
     const entries = Array.from({ length: n }, (_, i) => run(`09:${String(i).padStart(2, '0')}`, 'scheduled', 'idle'));
-    const lines = plain(render(page({ journal: { entries, readAt: NOW, responseMs: 400 } }), { rows: 4 }));
+    const lines = plain(render(page({ journal: { schedule: true, entries, readAt: NOW, responseMs: 400 } }), { rows: 4 }));
     assert.match(lines[WINDOW] ?? '', new RegExp(`^│ [\\d:–]+ +расписание +${n} ${word} — всё в порядке, применять нечего$`),
       `${n} collapses with its count`);
   }
@@ -155,7 +172,7 @@ test('the Russian count of collapsed checks: 3 проверки, 5 провер�
 test('the time is the clock for a run of today and a day and time for an older one', () => {
   const entries = [run('12:00', 'scheduled', 'idle'),
     { ...run('12:05', 'trial', 'idle'), at: '2026-10-25T12:05:00.000Z' }];
-  const lines = plain(render(page({ journal: { entries, readAt: NOW, responseMs: 400 } })));
+  const lines = plain(render(page({ journal: { schedule: true, entries, readAt: NOW, responseMs: 400 } })));
   assert.match(lines[WINDOW] ?? '', /^│ 12:00 {2}/);
   assert.match(lines[WINDOW + 1] ?? '', /^│ 25 окт 12:05 {2}/);
 });
@@ -163,7 +180,7 @@ test('the time is the clock for a run of today and a day and time for an older o
 test('the window scrolls in visual lines over the rail of its bracket', () => {
   const entries = ['12:00', '12:05', '12:10', '12:15', '12:20', '12:25']
     .map((time, i) => run(time, i % 2 ? 'mac' : 'scheduled', 'idle'));
-  const p = page({ journal: { entries, readAt: NOW, responseMs: 400 } });
+  const p = page({ journal: { schedule: true, entries, readAt: NOW, responseMs: 400 } });
   assert.equal(journalWindow(p, [], { timeZone: 'UTC', now: () => NOW }).length, 6);
 
   const lines = render(p, { rows: 3 });
@@ -183,7 +200,7 @@ test('the window scrolls in visual lines over the rail of its bracket', () => {
 });
 
 test('without overflow the window has no heavy rail, and its lines are not three columns narrow', () => {
-  const p = page({ journal: { entries: [run('12:00', 'mac', 'idle', 300)], readAt: NOW, responseMs: 400 } });
+  const p = page({ journal: { schedule: true, entries: [run('12:00', 'mac', 'idle', 300)], readAt: NOW, responseMs: 400 } });
   const lines = render(p, { rows: 4 });
   const text = 'кончился недельный лимит — применять нечего';
   assert.match(plain(lines)[WINDOW] ?? '', new RegExp(`^│ 12:00 {2}Mac {2}${text}$`));
@@ -193,7 +210,7 @@ test('without overflow the window has no heavy rail, and its lines are not three
 
 test('a poll that got no answer: the heading says so and the reason stands pinned over the window', () => {
   const p = page({ failed: 'Google недоступен. Повторите: сделанное сохранится.',
-    journal: { entries: [run('12:00', 'trial', 'idle', 300)], readAt: NOW, responseMs: 400 } });
+    journal: { schedule: true, entries: [run('12:00', 'trial', 'idle', 300)], readAt: NOW, responseMs: 400 } });
   const lines = render(p);
   assert.deepEqual(lines[12]?.at(-1), ['воркер не ответил · 12:42:30', S.yellow]);
   assert.deepEqual(lines[WINDOW], [['│ ', S.dim], ['Google недоступен. Повторите: сделанное сохранится.', S.yellow]],
@@ -219,7 +236,7 @@ test('the caption of an action: closed, the journal stands right after the corne
 });
 
 test('the caption of an action opens with a rule under its label, what it does up front', () => {
-  const p = page({ journal: { entries: [run('12:00', 'trial', 'idle')], readAt: NOW, responseMs: 400 } });
+  const p = page({ journal: { schedule: true, entries: [run('12:00', 'trial', 'idle')], readAt: NOW, responseMs: 400 } });
   const open = render(p, { cursor: FIRST_ACTION + 1, caption: true });
   const lines = plain(open);
   assert.equal(lines[10], `│ ${' '.repeat(19)}━━━━━━━━`, 'a rule under «Починить»');

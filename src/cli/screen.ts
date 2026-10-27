@@ -360,7 +360,7 @@ export class Screen {
       const rule = ruleLine(this.model, { now: this.now, width, scheduledAt: this.pageScheduled() });
       lines = this.page ? renderWorker(this.page, { ...options, cursor: this.workerCursor, steps: this.steps, header: headerLine(options),
         rule, rows: this.windowRows(), offset: this.journalOffset, focus: this.journal, caption: this.captionView(),
-        lastApplied: this.model?.lastApplied ?? null, failed: this.model ? lastRunFailed(this.model) : false }) :
+        lastApplied: this.model?.lastApplied ?? null }) :
         [headerLine(options), rule];
     } else if (this.model) lines = renderOverview(this.model, { ...options, cursor: this.cursor });
     else return [];
