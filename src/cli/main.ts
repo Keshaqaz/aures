@@ -11,7 +11,7 @@ import { login } from './login.ts';
 import { upgrade } from './upgrade.ts';
 import { uninstall } from './uninstall.ts';
 import { WatchFiles } from './watch-files.ts';
-import { LaunchAgent } from './launch-agent.ts';
+import { LaunchAgent, removeCheckLeftovers } from './launch-agent.ts';
 import { KeychainEntry, GOOGLE_TOKEN_ACCOUNT, WORKER_SECRET_ACCOUNT } from './keychain.ts';
 import { openInBrowser, copyToClipboard } from './browser.ts';
 import { liveLine } from './live-line.ts';
@@ -116,7 +116,8 @@ async function main(): Promise<number> {
     return 1;
   }
   if (run === 'watch') {
-    await new LaunchAgent().remove();
+    // Silent, code 0: only the leftovers of the check from this Mac go (ADR-0009).
+    await removeCheckLeftovers({ files, agent: new LaunchAgent() });
     return 0;
   }
   if (run === 'screen') return await openMainScreen();

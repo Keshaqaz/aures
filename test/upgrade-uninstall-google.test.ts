@@ -130,13 +130,32 @@ test('uninstall on Google stops the worker, deletes its web app, ends the Google
   assert.deepEqual(world.google.violations, []);
 });
 
-test('upgrade removes the agent the check from this Mac of an earlier version left', async () => {
+test('upgrade removes all the check from this Mac left: the agent, its log, the session and watch.json; the files of this install stay', async () => {
   const { mac, run } = await onGoogle();
   await leftoverCheck(mac);
+  await mac.files.writeLanguage('ru');
   const { code, io } = await run(upgrade);
   assert.equal(code, 0, io.output());
   assert.equal(mac.launchctl.loaded.size, 0);
   assert.equal(await exists(mac.agent.plistPath), false);
+  assert.equal(await exists(mac.agent.logPath), false);
+  assert.equal(await mac.files.read('chatgpt-session.json'), null);
+  assert.equal(await mac.files.read('watch.json'), null);
+  assert.ok(await mac.files.readInstall(), 'the install record stays');
+  assert.equal(await mac.files.readLanguage(), 'ru', 'settings.json stays');
+});
+
+// The leftovers go even when there is no install to upgrade — a GitHub record of an earlier
+// version, or none at all (ADR-0009).
+test('upgrade with no install to upgrade still removes what the check from this Mac left', async () => {
+  const { mac, run } = await cliWorld();
+  await leftoverCheck(mac);
+  const { code } = await run(upgrade);
+  assert.equal(code, 1);
+  assert.equal(await exists(mac.agent.plistPath), false);
+  assert.equal(await exists(mac.agent.logPath), false);
+  assert.equal(await mac.files.read('chatgpt-session.json'), null);
+  assert.equal(await mac.files.read('watch.json'), null);
 });
 
 test('uninstall removes what earlier versions left: the agent and log of the check from this Mac, its files and the GitHub sign-in', async () => {

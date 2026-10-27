@@ -4,6 +4,7 @@ import { CommandFailed, unfinished, notInstalled, command } from './common.ts';
 import type { CommandOptions, Sleep } from './common.ts';
 import { connectGoogle, deployWorker, askAfterDeploy, workerDid, readSecret } from './google.ts';
 import type { GoogleWorker } from './watch-files.ts';
+import { removeCheckLeftovers } from './launch-agent.ts';
 import { t } from './language.ts';
 
 const updatedLine = (): string => t(`The worker is updated to ${pkg.version}. The changes take effect from the next run.`,
@@ -11,15 +12,16 @@ const updatedLine = (): string => t(`The worker is updated to ${pkg.version}. Th
 
 // `aures upgrade`, after `brew upgrade`: puts this version's worker into the worker of this
 // install on Google. Nothing changes the code that runs with the user's session until the user
-// runs this. The worker migrates its state and rules itself when it reads them. The agent left
-// by the check from this Mac (ADR-0009) goes first: it would run a command that is gone.
+// runs this. The worker migrates its state and rules itself when it reads them. What the check
+// from this Mac of earlier versions left goes first (ADR-0009) — before the install record is
+// even read, so a GitHub record or none at all cleans this Mac too.
 // appsScriptSource is the Apps Script worker bundle.
 export interface UpgradeOptions extends CommandOptions { appsScriptSource: string }
 export async function upgrade(options: UpgradeOptions): Promise<number> {
-  const { io, mac: { files, agent }, now = Date.now, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)) } = options;
+  const { io, mac, now = Date.now, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)) } = options;
   return command('upgrade', io, async () => {
-    await agent.remove();
-    const install = await files.readInstall();
+    await removeCheckLeftovers(mac);
+    const install = await mac.files.readInstall();
     if (!install) throw new CommandFailed(notInstalled());
     await redeployGoogle({ ...options, now, sleep }, install.google);
     io.print(updatedLine());

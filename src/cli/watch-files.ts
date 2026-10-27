@@ -76,4 +76,7 @@ export class WatchFiles {
   }
   // The folder with everything in it, for uninstall.
   async removeAll(): Promise<void> { await rm(this.dir, { recursive: true, force: true }); }
+  // One file of the folder, gone when it is not there: what earlier versions left beside the
+  // install record goes on its own, without the folder (ADR-0009).
+  async remove(name: string): Promise<void> { await rm(join(this.dir, name), { force: true }); }
 }
