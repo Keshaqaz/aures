@@ -350,12 +350,28 @@ test('a record of the removed GitHub platform counts as no install: setup deploy
   await cli.mac.files.write('install.json', { platform: 'github', accounts: { chatgpt: 'fake@example.invalid' } });
   const { code, io } = await cli.run();
   assert.equal(code, 0, io.output());
+  // The repository of the old worker is told before the stages, before the record is overwritten.
+  assert.equal(io.lines[0], 'Удалите репозиторий codex-auto-resets-worker в своём аккаунте GitHub ' +
+    '(https://github.com/settings/repositories): пока он есть, воркер прежней версии продолжает работать по расписанию и применять сбросы');
+  assert.equal(io.lines[1], '[1/4] Вход в Google');
   const project = deployed(cli);
   const [deploymentId] = [...project.deployments.keys()];
   const url = `https://script.google.com/macros/s/${deploymentId}/exec`;
   assert.deepEqual(await cli.mac.files.readInstall(), { platform: 'google', google: { scriptId: project.scriptId, deploymentId, url },
     accounts: { google: 'owner@example.invalid', chatgpt: 'fake@example.invalid' } });
   noViolations(cli);
+});
+
+test('setup over an install on Google, or over none, says nothing of GitHub', async () => {
+  const cli = await googleWorld();
+  await cli.run();
+  const again = await cli.run({ answers: [] });
+  assert.equal(again.code, 0, again.io.output());
+  assert.ok(!again.io.output().includes('codex-auto-resets-worker'), 'no GitHub step over an install on Google');
+  const fresh = await googleWorld();
+  const first = await fresh.run();
+  assert.equal(first.code, 0, first.io.output());
+  assert.ok(!first.io.output().includes('codex-auto-resets-worker'), 'no GitHub step without an install record');
 });
 
 test('setup in English goes in the same four stages, with no question about the platform', async () => {

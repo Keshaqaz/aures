@@ -68,6 +68,12 @@ export class WatchFiles {
     const install = await this.read(INSTALL);
     return object(install) && install.platform !== 'google';
   }
+  // The record names the GitHub platform of an earlier version by name (ADR-0009): its worker
+  // keeps running until the user deletes its repository.
+  async githubInstall(): Promise<boolean> {
+    const install = await this.read(INSTALL);
+    return object(install) && install.platform === 'github';
+  }
   async writeInstall(install: Install): Promise<void> { await this.write(INSTALL, install); }
   // Keeps the email of an account just signed in to in the install record; nothing without one.
   async rememberAccount(account: Account, email: string | null): Promise<void> {

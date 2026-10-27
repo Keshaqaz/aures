@@ -1,5 +1,5 @@
 import { setupGoogle } from './setup-google.ts';
-import { Stages, command } from './common.ts';
+import { Stages, command, capitalized, githubRepoStep } from './common.ts';
 import type { CommandOptions } from './common.ts';
 import { t } from './language.ts';
 
@@ -18,6 +18,9 @@ export interface SetupOptions extends CommandOptions {
 export async function setup(options: SetupOptions): Promise<number> {
   const { io, mac, now = Date.now, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)) } = options;
   const code = await command('setup', io, async () => {
+    // The worker of the removed GitHub platform (ADR-0009) keeps running while its repository is
+    // there: the user learns it here, before the record of that version is overwritten.
+    if (await mac.files.githubInstall()) io.print(capitalized(githubRepoStep()));
     // A record without a worker on Google counts as no install (ADR-0009): it is written anew
     // before the stages, so that the sign-ins have a record to keep their accounts in.
     const install = await mac.files.readInstall();

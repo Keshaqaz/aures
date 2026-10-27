@@ -2,13 +2,17 @@ import { GoogleFailure, revokeGoogle } from '../google/api.ts';
 import { PROJECT_TITLE } from '../apps-script/layout.ts';
 import { KeychainUnavailable, KeychainEntry, GITHUB_TOKEN_ACCOUNT } from './keychain.ts';
 import type { Keychain } from './keychain.ts';
-import { YES, command } from './common.ts';
+import { YES, command, capitalized, githubRepoStep } from './common.ts';
 import { connectGoogle, askWorker, readSecret } from './google.ts';
 import type { WorkerReply } from './google.ts';
 import { projectUrl } from './active-worker.ts';
-import type { CommandOptions, Printer, Mac } from './common.ts';
+import { removeCheckLeftovers } from './launch-agent.ts';
+import type { CommandOptions, Printer, Io, Mac } from './common.ts';
 import type { GoogleWorker } from './watch-files.ts';
 import { t } from './language.ts';
+import { stat } from 'node:fs/promises';
+
+const exists = (path: string): Promise<boolean> => stat(path).then(() => true, () => false);
 
 // Where the user takes back the access of the worker script and of the CLI's Google sign-in.
 const CONNECTIONS = 'https://myaccount.google.com/connections';
@@ -50,8 +54,10 @@ async function stopGoogleWorker({ fetch, secretKeychain, io }: Pick<CommandOptio
 
 // Removes what the CLI can of the worker on Google: stops it, deletes its deployment, ends the
 // CLI's Google sign-in and forgets both secrets. The project itself only the user can delete:
-// the Apps Script API has no call for it. Returns the manual steps for what is left.
-async function removeGoogle(options: CommandOptions & { now: () => number }, google: GoogleWorker | null): Promise<string[]> {
+// the Apps Script API has no call for it. Returns the manual steps for what is left. locked
+// keeps whether the line of a locked Keychain was printed, so it is said once for all entries.
+async function removeGoogle(options: CommandOptions & { now: () => number }, google: GoogleWorker | null,
+  locked: KeychainLocked): Promise<string[]> {
   const { fetch, googleKeychain, secretKeychain, io, open, now } = options;
   const stopped = google ? await stopGoogleWorker(options, google.url) : false;
   let token = await readSecret(googleKeychain);
@@ -80,7 +86,7 @@ async function removeGoogle(options: CommandOptions & { now: () => number }, goo
   }
   if (google || token) {
     await removeFromKeychain(io, [googleKeychain, secretKeychain], t('The Google sign-in and the worker secret are removed from the Keychain.',
-      'Вход в Google и секрет воркера удалены из Связки ключей.'));
+      'Вход в Google и секрет воркера удалены из Связки ключей.'), locked);
   }
   const steps: string[] = [];
   if (google) {
@@ -96,28 +102,39 @@ async function removeGoogle(options: CommandOptions & { now: () => number }, goo
   return steps;
 }
 
-// Removes these Keychain entries and says so; a locked Keychain is named for the user to clean by hand.
-async function removeFromKeychain(io: Printer, entries: Keychain[], done: string): Promise<void> {
+// Whether the line of a Keychain that did not answer was printed already: the Google entries and
+// the GitHub one share it, so the user reads the line once.
+interface KeychainLocked { told: boolean }
+const keychainLockedLine = (): string =>
+  t('The Keychain is unavailable: delete the codex-auto-resets entry in it by hand.', 'Связка ключей недоступна: удалите в ней запись codex-auto-resets вручную.');
+
+// Removes these Keychain entries and says so; a locked Keychain is named for the user to clean
+// by hand — once, however many of its entries there were.
+async function removeFromKeychain(io: Printer, entries: Keychain[], done: string, locked: KeychainLocked): Promise<void> {
   try {
     for (const entry of entries) await entry.remove();
     io.print(done);
   } catch (error) {
     if (!(error instanceof KeychainUnavailable)) throw error;
-    io.print(t('The Keychain is unavailable: delete the codex-auto-resets entry in it by hand.', 'Связка ключей недоступна: удалите в ней запись codex-auto-resets вручную.'));
+    if (!locked.told) { locked.told = true; io.print(keychainLockedLine()); }
   }
 }
 
-const capitalized = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
-
-// What earlier versions left on this Mac (ADR-0009): the agent of the check from this Mac, its
-// log, and the GitHub sign-in in the Keychain. The computer session and watch.json go with the
-// folder of the install record (removeAll); the session is not revoked, it ends by itself.
-async function removeLeftovers({ mac: { agent }, io, githubKeychain }: { mac: Mac; io: Printer; githubKeychain: Keychain }): Promise<void> {
-  if (await agent.remove()) io.print(t('The check from this Mac of an earlier version is removed.', 'Проверка с этого Mac от прежней версии удалена.'));
-  await agent.removeLogFolder();
-  if (await githubKeychain.read().catch(() => null)) {
+// What earlier versions left on this Mac (ADR-0009): everything the check from this Mac left —
+// its agent, its log, the computer session and watch.json (removeCheckLeftovers) — and the
+// GitHub sign-in in the Keychain. The session is not revoked, it ends by itself.
+async function removeLeftovers({ mac, io, githubKeychain, locked }: { mac: Mac; io: Printer; githubKeychain: Keychain;
+  locked: KeychainLocked }): Promise<void> {
+  if (await removeCheckLeftovers(mac)) io.print(t('The check from this Mac of an earlier version is removed.', 'Проверка с этого Mac от прежней версии удалена.'));
+  let github: string | null;
+  try { github = await githubKeychain.read(); } catch (error) {
+    if (!(error instanceof KeychainUnavailable)) throw error;
+    if (!locked.told) { locked.told = true; io.print(keychainLockedLine()); }
+    github = null;
+  }
+  if (github) {
     await removeFromKeychain(io, [githubKeychain], t('The GitHub sign-in of an earlier version is removed from the Keychain.',
-      'Вход в GitHub от прежней версии удалён из Связки ключей.'));
+      'Вход в GitHub от прежней версии удалён из Связки ключей.'), locked);
   }
 }
 
@@ -127,10 +144,16 @@ async function removeLeftovers({ mac: { agent }, io, githubKeychain }: { mac: Ma
 export async function uninstall(options: CommandOptions & { githubKeychain?: Keychain }): Promise<number> {
   const { io, mac, now = Date.now, githubKeychain = new KeychainEntry(GITHUB_TOKEN_ACCOUNT) } = options;
   return command('uninstall', io, async () => {
+    // What this run says at all: one that says nothing names what became of the install instead.
+    let said = 0;
+    const telling: Io = { ...io, print: line => { said++; io.print(line); } };
+    const locked: KeychainLocked = { told: false };
     const install = await mac.files.readInstall();
     const google = install?.google ?? null;
+    const github = await mac.files.githubInstall();
+    const hadFiles = await exists(mac.files.dir);
     if (google) {
-      io.print(t(`This deletes the worker on Google (${projectUrl(google.scriptId)}: its schedule, ChatGPT sign-in and web app) and the Google sign-in in the Keychain.`,
+      telling.print(t(`This deletes the worker on Google (${projectUrl(google.scriptId)}: its schedule, ChatGPT sign-in and web app) and the Google sign-in in the Keychain.`,
         `Будут удалены воркер на Google (${projectUrl(google.scriptId)}: расписание, вход воркера в ChatGPT и web app) и вход в Google из Связки ключей.`));
       if (!YES.includes((await io.prompt(t('Delete? [y/N] ', 'Удалить? [y/N] '))).trim().toLowerCase())) {
         io.print(t('Cancelled.', 'Отменено.'));
@@ -138,9 +161,15 @@ export async function uninstall(options: CommandOptions & { githubKeychain?: Key
       }
     }
     // Before removeAll, which takes the install record with it: a failure here leaves the record for a repeated uninstall.
-    const steps = await removeGoogle({ ...options, now }, google);
-    await removeLeftovers({ mac, io, githubKeychain });
+    const steps = await removeGoogle({ ...options, io: telling, now }, google, locked);
+    await removeLeftovers({ mac, io: telling, githubKeychain, locked });
     await mac.files.removeAll();
+    // The worker of the removed GitHub platform (ADR-0009) runs while its repository is there.
+    if (github) steps.push(githubRepoStep());
+    if (!said && !steps.length) {
+      io.print(hadFiles ? t('The aures files on this Mac are removed.', 'Файлы aures на этом Mac удалены.') :
+        t('aures is not installed on this Mac: nothing to remove.', 'aures на этом Mac не установлен: удалять нечего.'));
+    }
     if (steps.length === 1) io.print(`${t('Last step', 'Последний шаг')}: ${steps[0]}`);
     else if (steps.length) {
       io.print(t('Left to do by hand:', 'Осталось сделать вручную:'));

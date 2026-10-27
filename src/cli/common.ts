@@ -51,6 +51,16 @@ export type Rule = Exclude<keyof Rules, 'formatVersion'>;
 // A failure explained to the user in its message.
 export class CommandFailed extends Error {}
 
+export const capitalized = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
+
+// The worker of an earlier version on GitHub (ADR-0009): its schedule lives in its repository,
+// which only the user can delete. While it is there, two workers run on one quota, so setup and
+// uninstall both tell the user to remove it.
+export const githubRepoStep = (): string => t('delete the repository codex-auto-resets-worker in your GitHub account ' +
+  '(https://github.com/settings/repositories): while it is there, the worker of the earlier version keeps running on its schedule and applying resets',
+  'удалите репозиторий codex-auto-resets-worker в своём аккаунте GitHub (https://github.com/settings/repositories): ' +
+  'пока он есть, воркер прежней версии продолжает работать по расписанию и применять сбросы');
+
 export const unfinished = (): string => t('Setup is not finished. Run `aures setup`.', 'Установка не завершена. Запустите `aures setup`.');
 // The install record names no worker on Google (ADR-0009): there is no install to work with.
 export const notInstalled = (): string => t('The worker is not installed. Run `aures setup`.', 'Воркер не установлен. Запустите `aures setup`.');

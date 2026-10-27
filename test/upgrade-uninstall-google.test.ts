@@ -4,6 +4,8 @@ import { setup } from '../src/cli/setup.ts';
 import { status } from '../src/cli/status.ts';
 import { upgrade } from '../src/cli/upgrade.ts';
 import { uninstall } from '../src/cli/uninstall.ts';
+import { KeychainUnavailable } from '../src/cli/keychain.ts';
+import type { Keychain } from '../src/cli/keychain.ts';
 import { cliWorld } from './support/cli-world.ts';
 import { leftoverCheck } from './support/fake-mac.ts';
 import { bundle } from './support/fake-apps-script.ts';
@@ -12,6 +14,16 @@ import type { FakeProject } from './support/fake-google.ts';
 
 const GOOGLE_LOGIN = 'https://accounts.google.com/';
 const CONNECTIONS = 'https://myaccount.google.com/connections';
+const REPOSITORIES = 'https://github.com/settings/repositories';
+const LOCKED_KEYCHAIN = 'Связка ключей недоступна: удалите в ней запись codex-auto-resets вручную.';
+const REPO_STEP = 'удалите репозиторий codex-auto-resets-worker в своём аккаунте GitHub ' +
+  `(https://github.com/settings/repositories): пока он есть, воркер прежней версии продолжает работать по расписанию и применять сбросы`;
+// A Keychain that does not answer, as a locked one.
+const lockedKeychain = (): Keychain => ({
+  read: async () => { throw new KeychainUnavailable(); },
+  write: async () => {},
+  remove: async () => {},
+});
 const exists = (path: string): Promise<boolean> => stat(path).then(() => true, () => false);
 const link = (project: FakeProject): string => `https://script.google.com/home/projects/${project.scriptId}`;
 
@@ -243,4 +255,52 @@ test('uninstall after a setup on Google cut short before the deploy names only t
   assert.equal(world.google.refreshTokens.size, 0);
   assert.equal(keychain.entries.size, 0);
   assert.equal(io.lines.at(-1), 'Последний шаг: удалите проект aures-worker на странице https://script.google.com/home/projects/fake-script-cut');
+});
+
+test('uninstall with nothing on this Mac says there is nothing to remove', async () => {
+  const { run } = await cliWorld();
+  const { code, io } = await run(uninstall);
+  assert.equal(code, 0);
+  assert.deepEqual(io.lines, ['aures на этом Mac не установлен: удалять нечего.']);
+});
+
+test('uninstall with only the files of this Mac says they are removed', async () => {
+  const { mac, run } = await cliWorld();
+  await mac.files.writeLanguage('ru');
+  const { code, io } = await run(uninstall);
+  assert.equal(code, 0);
+  assert.deepEqual(io.lines, ['Файлы aures на этом Mac удалены.']);
+  assert.equal(await exists(mac.files.dir), false);
+});
+
+test('uninstall over a GitHub record names the repository its worker still runs from', async () => {
+  const { run, mac } = await cliWorld();
+  await mac.files.write('install.json', { platform: 'github' });
+  const { code, io } = await run(uninstall);
+  assert.equal(code, 0, io.output());
+  assert.deepEqual(io.lines, [`Последний шаг: ${REPO_STEP}`]);
+});
+
+test('uninstall on Google prints no step about GitHub', async () => {
+  const { project, run } = await onGoogle();
+  const { code, io } = await run(uninstall, { answers: ['y'] });
+  assert.equal(code, 0, io.output());
+  assert.ok(!io.output().includes('codex-auto-resets-worker'), io.output());
+  assert.equal(io.lines.at(-1), `Последний шаг: удалите проект aures-worker на странице ${link(project)}`);
+});
+
+test('a locked Keychain in the leftovers is named once when the Google entries named it already', async () => {
+  const { googleKeychain, run } = await onGoogle();
+  // The Google entries cannot be removed; the GitHub one cannot even be read.
+  const notRemoved: Keychain = { ...googleKeychain, remove: async () => { throw new KeychainUnavailable(); } };
+  const { code, io } = await run(uninstall, { answers: ['y'], googleKeychain: notRemoved, githubKeychain: lockedKeychain() });
+  assert.equal(code, 0, io.output());
+  assert.equal(io.lines.filter(line => line === LOCKED_KEYCHAIN).length, 1, io.output());
+});
+
+test('a locked Keychain with nothing else to remove is named on its own', async () => {
+  const { run } = await cliWorld();
+  const { code, io } = await run(uninstall, { githubKeychain: lockedKeychain() });
+  assert.equal(code, 0);
+  assert.deepEqual(io.lines, [LOCKED_KEYCHAIN]);
 });
