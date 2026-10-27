@@ -4,6 +4,8 @@ Status: accepted
 
 # Две площадки воркера: GitHub и Google Apps Script
 
+**Уточнено** [ADR-0009](0009-google-only-worker.md) 27 октября 2026: площадка GitHub и переключение площадки удалены, остался только Google Apps Script.
+
 20–21 октября 2026 года проба (`.scratch/apps-script-worker/issues/01-deploy-probe.md`) показала, что воркер можно развернуть из CLI в Google Apps Script в аккаунте пользователя. Триггер `everyMinutes(1)` за 15 минут не пропустил ни одного тика, тогда как GitHub доставляет около 23% слотов. Цена Apps Script — два экрана «непроверенное приложение», ручной переключатель `usersettings` и проект, который CLI не может удалить. Поэтому Apps Script добавлен **рядом** с GitHub, а не вместо него.
 
 **Решение.**
