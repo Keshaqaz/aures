@@ -44,8 +44,8 @@ export interface Login { id: string; session: Session }
 export type BrokenStateReason = 'state_missing' | 'state_unreadable' |
   'state_format_unknown' | 'state_without_session' | 'rules_missing' | 'rules_unreadable' | 'rules_format_unknown';
 
-// The worker cannot read its own Script Properties and only the user can fix them:
-// a lost or wrong key, a tampered or unknown state, unreadable rules.
+// The worker cannot read its own Script Properties and only the user can fix them: the state
+// or the rules are missing, unreadable or of an unknown format, or the state holds no session.
 export class BrokenState extends Error {
   reason: BrokenStateReason;
   constructor(reason: BrokenStateReason) { super(reason); this.reason = reason; }
