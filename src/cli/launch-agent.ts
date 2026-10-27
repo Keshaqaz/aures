@@ -41,13 +41,14 @@ export class LaunchAgent {
 
   // Unloads the agent and deletes its plist. The plist goes first: the agent's own bootout kills
   // the `aures watch` process that runs this, so nothing after the bootout would run — and a
-  // plist left behind loads the agent again at the next login. Without a plist there is no
-  // agent, and launchctl is not called. True when the plist was there.
+  // plist left behind loads the agent again at the next login. The agent can be loaded with its
+  // plist already gone — a bootout that never ran, a plist deleted by hand — and no one else
+  // will call bootout, so it runs with no plist too. True when the plist was there.
   async remove(): Promise<boolean> {
-    if (!await exists(this.plistPath)) return false;
-    await rm(this.plistPath, { force: true });
+    const plist = await exists(this.plistPath);
+    if (plist) await rm(this.plistPath, { force: true });
     await this.launchctl(['bootout', this.target]);
-    return true;
+    return plist;
   }
 
   async removeLogFolder(): Promise<void> { await rm(dirname(this.logPath), { recursive: true, force: true }); }
@@ -56,8 +57,8 @@ export class LaunchAgent {
 
 // What the check from this Mac of earlier versions left besides its agent (ADR-0009): the
 // computer session and watch.json next to the install record, and the folder of its log. The
-// agent goes last — its bootout kills the `aures watch` that runs this. True when the agent was
-// there. watch, upgrade and uninstall all remove the leftovers through here.
+// agent goes last — its bootout kills the `aures watch` that runs this. True when the agent's
+// plist was there. watch, upgrade and uninstall all remove the leftovers through here.
 export async function removeCheckLeftovers({ files, agent }: { files: Pick<MacFiles, 'remove'>; agent: LaunchAgent }): Promise<boolean> {
   for (const name of ['chatgpt-session.json', 'watch.json']) await files.remove(name);
   await agent.removeLogFolder();

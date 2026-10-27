@@ -22,10 +22,14 @@ test('remove unloads the agent the check from this Mac left and deletes its plis
   assert.equal(await exists(mac.agent.plistPath), false);
 });
 
-test('without a plist there is no agent: remove does not call launchctl', async () => {
+// The agent can be loaded with its plist already gone — a bootout that never ran, a plist
+// deleted by hand — and no one else will call bootout, so remove unloads it with no plist too.
+test('without a plist remove unloads the agent all the same and says there was none', async () => {
   const mac = await fakeMac();
+  mac.launchctl.loaded.add(AGENT_LABEL);
   assert.equal(await mac.agent.remove(), false);
-  assert.deepEqual(mac.launchctl.calls, []);
+  assert.deepEqual(mac.launchctl.calls, [['bootout', `gui/${UID}/${AGENT_LABEL}`]]);
+  assert.equal(mac.launchctl.loaded.size, 0);
 });
 
 test('a plist whose agent is not loaded is deleted all the same', async () => {
@@ -43,8 +47,8 @@ test('removeLogFolder deletes the folder with the log', async () => {
   assert.equal(await exists(mac.agent.logPath), false);
 });
 
-// The agent runs `aures watch` every 2 minutes; with no plist in this home there is nothing to
-// unload, so the real launchctl is never reached.
+// The agent runs `aures watch` every 2 minutes; with no plist in this home the bootout hits an
+// agent that is not loaded, which changes nothing, and watch prints nothing all the same.
 test('watch, which the left agent runs, prints nothing and ends with 0', async () => {
   const home = await tempDir('watch-home-');
   const { stdout, stderr } = await promisify(execFile)(process.execPath, [MAIN, 'watch'], { env: { ...process.env, HOME: home } });
