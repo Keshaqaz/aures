@@ -22,7 +22,7 @@ Runs in your own Google account, on Google Apps Script. Your Mac can be off.
 
 - **No reset expires unused.** The worker applies a reset in the last hour before it expires.
 - **Weekly limit hit — reset within minutes.** An optional rule applies the reset that expires first. The worker checks the limit itself every 5 minutes, even with the Mac off, whichever client used it up: Codex, opencode, your phone.
-- **One screen.** `aures` shows the resets on top and the rules below. Enter on a reset applies it now, regardless of the rules; Enter on a rule switches it. `Tab` opens the «Worker» screen: the worker and its state, the accounts, «Check now» (a trial run that applies nothing), «Repair» (deploys this version of the worker again and brings its schedule back), «Pause» (the schedule off; «Apply now» still works) and the live journal of the worker, polled while the screen is open. The screen and the pause are detailed in the [guide](docs/installation.en.md).
+- **One screen.** `aures` shows the resets on top, the rules and the worker's state below. Enter on a reset applies it now, regardless of the rules; Enter on a rule switches it. `Tab` opens the «Worker» screen: the worker and its state, the accounts, «Check now» (a trial run that applies nothing), «Repair» (deploys this version of the worker again and brings its schedule back), «Pause» (the schedule off; «Apply now» still works) and the live journal of the worker, polled while the screen is open. The screen and the pause are detailed in the [guide](docs/installation.en.md).
 - **No servers, no subscriptions.** Everything runs in your Google account, within ~5–10 of the 90 free trigger-minutes a day.
 - **Codex on your Mac is untouched.** The worker has a ChatGPT sign-in of its own; nothing is copied from Codex.
 
@@ -77,7 +77,7 @@ Full guide, including installing from source: [docs/installation.en.md](docs/ins
 <img src="docs/assets/worker-en.png" alt="The «Worker» screen: the worker and its state, the accounts, the actions and the live journal">
 </div>
 
-- **Worker** — its state on the right (active, on pause, last run failed) and a link to the script project.
+- **Worker** — its state on the right (active, paused, last run failed, no scheduled run, no schedule, not run yet) and a link to the script project.
 - **Accounts** — the Google account and the worker's ChatGPT sign-in; Enter on either signs in again.
 - **Actions** — «Check now» (a trial run that applies nothing), «Repair» (deploys this version of the worker again and brings its schedule back) and «Pause» / «Unpause» (the schedule off and back on; «Apply now» still works on pause). Hold the cursor on an action for a moment and its caption opens under the row: what it does and what it leaves alone.
 - **Journal** — the last runs of the worker, newest first, in three columns: when, who started it (the schedule or you) and what came of it. It is polled every 30 seconds while the screen is open.
