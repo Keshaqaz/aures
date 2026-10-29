@@ -4,8 +4,9 @@
 
 ### AUto-RESets for Codex
 
-Сам применяет выданные сбросы лимита ChatGPT, чтобы они не сгорали.<br>
-Работает в вашем аккаунте Google, в Google Apps Script. Компьютер можно выключить.
+ChatGPT выдаёт сбросы лимита для Codex, и забытый сброс сгорает неиспользованным.<br>
+AURES применяет каждый вовремя или сразу, как кончится недельный лимит:<br>
+бесплатно, в вашем аккаунте Google, с выключенным Mac.
 
 [![version](https://img.shields.io/badge/version-0.6.2-8A2BE2)](https://github.com/Keshaqaz/aures/releases/latest)
 [![platform](https://img.shields.io/badge/CLI-macOS-000?logo=apple)](installation.md)
@@ -14,7 +15,7 @@
 
 [English](../README.md) · **Русский**
 
-<img src="assets/status-ru.png" alt="Экран aures: сбросы сверху, правила снизу, воркер в Google Apps Script">
+<img src="assets/demo-ru.gif" width="880" alt="aures: Enter на сбросе, «y», сброс применён воркером в Google Apps Script и виден в его журнале">
 
 </div>
 

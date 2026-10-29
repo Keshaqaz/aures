@@ -4,8 +4,9 @@
 
 ### AUto-RESets for Codex
 
-Applies your issued ChatGPT rate-limit resets so they don't go to waste.<br>
-Runs in your own Google account, on Google Apps Script. Your Mac can be off.
+ChatGPT issues rate-limit resets for Codex, and a reset you forget expires unused.<br>
+AURES applies each one on time, or as soon as your weekly limit runs out:<br>
+free, in your own Google account, with your Mac off.
 
 [![version](https://img.shields.io/badge/version-0.6.2-8A2BE2)](https://github.com/Keshaqaz/aures/releases/latest)
 [![platform](https://img.shields.io/badge/CLI-macOS-000?logo=apple)](docs/installation.en.md)
@@ -14,7 +15,7 @@ Runs in your own Google account, on Google Apps Script. Your Mac can be off.
 
 **English** · [Русский](docs/README.ru.md)
 
-<img src="docs/assets/status-en.png" alt="The aures screen: resets on top, rules below, the worker on Google Apps Script">
+<img src="docs/assets/demo-en.gif" width="880" alt="aures: Enter on a reset, «y», the reset applied by the worker on Google Apps Script and shown in its journal">
 
 </div>
 
