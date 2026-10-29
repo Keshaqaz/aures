@@ -1,0 +1,30 @@
+name: Bug
+description: Something in aures or the worker does not work as described
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected and what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: status
+    attributes:
+      label: aures status
+      description: The output of `aures status`. It holds no tokens; replace your email and script ID if you like.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The first line of `aures status`, e.g. `aures 0.6.2`.
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version

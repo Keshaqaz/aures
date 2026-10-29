@@ -8,7 +8,7 @@ ChatGPT выдаёт сбросы лимита для Codex, и забытый �
 AURES применяет каждый вовремя или сразу, как кончится недельный лимит:<br>
 бесплатно, в вашем аккаунте Google, с выключенным Mac.
 
-[![version](https://img.shields.io/badge/version-0.6.2-8A2BE2)](https://github.com/Keshaqaz/aures/releases/latest)
+[![version](https://img.shields.io/github/v/release/Keshaqaz/aures?label=version&color=8A2BE2)](https://github.com/Keshaqaz/aures/releases/latest)
 [![platform](https://img.shields.io/badge/CLI-macOS-000?logo=apple)](installation.md)
 [![node](https://img.shields.io/badge/node-%E2%89%A526-339933?logo=nodedotjs&logoColor=white)](installation.md)
 [![license](https://img.shields.io/badge/license-MIT-blue)](../LICENSE)
@@ -131,7 +131,6 @@ flowchart LR
 - **Нужен платный план ChatGPT** с пятичасовым и недельным лимитами. Если у плана один месячный лимит, правило «когда кончится недельный лимит» не срабатывает.
 - **Только macOS.** CLI хранит входы в Связке ключей.
 - **Состояние воркера не зашифровано.** Вход воркера в ChatGPT лежит в свойствах проекта скрипта: ключ лежал бы рядом ([ADR-0007](adr/0007-two-worker-platforms.md)). Web app отвечает только на запросы с секретом из вашей Связки ключей.
-- **Применение настоящего сброса воркером вживую пока не проверено.** Чтение сбросов и лимитов, вход и запрос применения проверены, подробности — в [ADR-0004](adr/0004-github-only-worker.md).
 
 ## Документация
 

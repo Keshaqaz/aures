@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question
+    url: https://github.com/Keshaqaz/aures/discussions
+    about: How to install, set up or use aures — ask in Discussions.

@@ -8,7 +8,7 @@ ChatGPT issues rate-limit resets for Codex, and a reset you forget expires unuse
 AURES applies each one on time, or as soon as your weekly limit runs out:<br>
 free, in your own Google account, with your Mac off.
 
-[![version](https://img.shields.io/badge/version-0.6.2-8A2BE2)](https://github.com/Keshaqaz/aures/releases/latest)
+[![version](https://img.shields.io/github/v/release/Keshaqaz/aures?label=version&color=8A2BE2)](https://github.com/Keshaqaz/aures/releases/latest)
 [![platform](https://img.shields.io/badge/CLI-macOS-000?logo=apple)](docs/installation.en.md)
 [![node](https://img.shields.io/badge/node-%E2%89%A526-339933?logo=nodedotjs&logoColor=white)](docs/installation.en.md)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -131,7 +131,6 @@ Both rules cover all resets and work independently; change them with `aures rule
 - **Paid ChatGPT plan required**, with 5-hour and weekly limits. On a plan with a single monthly limit the weekly rule never fires.
 - **macOS only.** The CLI keeps its sign-ins in the Keychain.
 - **The worker's state is not encrypted.** The worker's ChatGPT sign-in lives in the script project's properties: a key would sit right next to it ([ADR-0007](docs/adr/0007-two-worker-platforms.md)). The web app answers only requests with the secret from your Keychain.
-- **A real reset applied by the worker has not been verified live yet.** Reading resets and limits, sign-in and the apply request have been; details in [ADR-0004](docs/adr/0004-github-only-worker.md).
 
 ## Documentation
 
